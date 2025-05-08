@@ -8,11 +8,16 @@ import { LogIn, Eye, EyeOff } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
 import { useToast } from "@/hooks/use-toast";
-
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { useAuth } from "@/context/AuthContext"; 
+import { useNavigate } from "react-router-dom";
 const LoginPage = () => {
+  const navigate = useNavigate();
   const { language } = useTheme();
   const { t } = useTranslation(language);
   const { toast } = useToast();
+  const { setUser } = useAuth(); // ✅ جديد
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -42,29 +47,26 @@ const LoginPage = () => {
     setIsLoading(true);
     
     try {
-      // Here would be the actual authentication code
-      // For now, we'll just simulate a login after a delay
-      setTimeout(() => {
-        toast({
-          title: language === 'en' ? "Success" : "نجاح",
-          description: language === 'en' ? 
-            "You have successfully logged in" : 
-            "لقد قمت بتسجيل الدخول بنجاح",
-        });
-        
-        // Redirect to home page or last visited page
-        window.location.href = "/";
-      }, 1500);
-    } catch (error) {
+      const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+setUser(userCredential.user); // ✅ لتحديث المستخدم في السياق
+
+      toast({
+        title: language === 'en' ? "Success" : "نجاح",
+        description: language === 'en' ? 
+          "You have successfully logged in" : 
+          "لقد قمت بتسجيل الدخول بنجاح",
+      });
+    
+      navigate("/");
+    } catch (error: any) {
       toast({
         title: language === 'en' ? "Error" : "خطأ",
-        description: language === 'en' ? 
-          "Invalid email or password" : 
-          "بريد إلكتروني أو كلمة مرور غير صالحة",
+        description: error.message,
         variant: "destructive",
       });
       setIsLoading(false);
     }
+    
   };
   
   const togglePasswordVisibility = () => {

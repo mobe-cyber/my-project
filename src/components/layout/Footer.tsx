@@ -20,8 +20,8 @@ const Footer = () => {
             </div>
             <p className="text-muted-foreground mb-4">
               {language === 'en' 
-                ? "Your premier destination for high-quality eBooks in PDF and ePub formats."
-                : "وجهتك الأولى للكتب الإلكترونية عالية الجودة بصيغ PDF و ePub."
+                ? "Your premier destination for high-quality eBooks formats."
+                : "وجهتك الأولى للكتب الإلكترونية عالية الجودة."
               }
             </p>
             <div className="flex space-x-4 rtl:space-x-reverse">

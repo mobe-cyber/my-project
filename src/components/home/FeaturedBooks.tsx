@@ -1,12 +1,12 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import BookCard from "@/components/books/BookCard";
 import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
-
-// Mock data - in a real app this would come from an API
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
+// بيانات الكتب الافتراضية في حالة عدم وجود كتب في localStorage
 const mockBooks = [
   {
     id: 1,
@@ -14,7 +14,8 @@ const mockBooks = [
     author: "John Doe",
     coverImage: "https://picsum.photos/seed/book1/300/400",
     price: 19.99,
-    rating: 4.5
+    rating: 4.5,
+    categoryId: 2
   },
   {
     id: 2,
@@ -22,7 +23,8 @@ const mockBooks = [
     author: "Jane Smith",
     coverImage: "https://picsum.photos/seed/book2/300/400",
     price: 24.99,
-    rating: 4.2
+    rating: 4.2,
+    categoryId: 3
   },
   {
     id: 3,
@@ -30,7 +32,8 @@ const mockBooks = [
     author: "Alex Johnson",
     coverImage: "https://picsum.photos/seed/book3/300/400",
     price: 29.99,
-    rating: 4.8
+    rating: 4.8,
+    categoryId: 2
   },
   {
     id: 4,
@@ -38,7 +41,8 @@ const mockBooks = [
     author: "Sarah Williams",
     coverImage: "https://picsum.photos/seed/book4/300/400",
     price: 22.99,
-    rating: 4.6
+    rating: 4.6,
+    categoryId: 2
   },
   {
     id: 5,
@@ -46,7 +50,8 @@ const mockBooks = [
     author: "Michael Brown",
     coverImage: "https://picsum.photos/seed/book5/300/400",
     price: 27.99,
-    rating: 4.3
+    rating: 4.3,
+    categoryId: 2
   },
   {
     id: 6,
@@ -54,7 +59,8 @@ const mockBooks = [
     author: "Robert Miller",
     coverImage: "https://picsum.photos/seed/book6/300/400",
     price: 18.99,
-    rating: 4.4
+    rating: 4.4,
+    categoryId: 3
   },
   {
     id: 7,
@@ -62,7 +68,8 @@ const mockBooks = [
     author: "Emily Davis",
     coverImage: "https://picsum.photos/seed/book7/300/400",
     price: 21.99,
-    rating: 4.7
+    rating: 4.7,
+    categoryId: 4
   },
   {
     id: 8,
@@ -70,11 +77,12 @@ const mockBooks = [
     author: "David Wilson",
     coverImage: "https://picsum.photos/seed/book8/300/400",
     price: 23.99,
-    rating: 4.1
+    rating: 4.1,
+    categoryId: 3
   }
 ];
 
-// Arabic titles and authors for the same books
+// العناوين والمؤلفون باللغة العربية لنفس الكتب
 const mockBooksAr = [
   {
     id: 1,
@@ -82,7 +90,8 @@ const mockBooksAr = [
     author: "جون دو",
     coverImage: "https://picsum.photos/seed/book1/300/400",
     price: 19.99,
-    rating: 4.5
+    rating: 4.5,
+    categoryId: 2
   },
   {
     id: 2,
@@ -90,7 +99,8 @@ const mockBooksAr = [
     author: "جين سميث",
     coverImage: "https://picsum.photos/seed/book2/300/400",
     price: 24.99,
-    rating: 4.2
+    rating: 4.2,
+    categoryId: 3
   },
   {
     id: 3,
@@ -98,7 +108,8 @@ const mockBooksAr = [
     author: "أليكس جونسون",
     coverImage: "https://picsum.photos/seed/book3/300/400",
     price: 29.99,
-    rating: 4.8
+    rating: 4.8,
+    categoryId: 2
   },
   {
     id: 4,
@@ -106,7 +117,8 @@ const mockBooksAr = [
     author: "سارة ويليامز",
     coverImage: "https://picsum.photos/seed/book4/300/400",
     price: 22.99,
-    rating: 4.6
+    rating: 4.6,
+    categoryId: 2
   },
   {
     id: 5,
@@ -114,7 +126,8 @@ const mockBooksAr = [
     author: "مايكل براون",
     coverImage: "https://picsum.photos/seed/book5/300/400",
     price: 27.99,
-    rating: 4.3
+    rating: 4.3,
+    categoryId: 2
   },
   {
     id: 6,
@@ -122,7 +135,8 @@ const mockBooksAr = [
     author: "روبرت ميلر",
     coverImage: "https://picsum.photos/seed/book6/300/400",
     price: 18.99,
-    rating: 4.4
+    rating: 4.4,
+    categoryId: 3
   },
   {
     id: 7,
@@ -130,7 +144,8 @@ const mockBooksAr = [
     author: "إيميلي ديفيس",
     coverImage: "https://picsum.photos/seed/book7/300/400",
     price: 21.99,
-    rating: 4.7
+    rating: 4.7,
+    categoryId: 4
   },
   {
     id: 8,
@@ -138,7 +153,8 @@ const mockBooksAr = [
     author: "ديفيد ويلسون",
     coverImage: "https://picsum.photos/seed/book8/300/400",
     price: 23.99,
-    rating: 4.1
+    rating: 4.1,
+    categoryId: 3
   }
 ];
 
@@ -146,30 +162,107 @@ interface FeaturedBooksProps {
   title: string;
   limit?: number;
   viewAllLink?: string;
+  categoryId?: number; // إضافة معرف الفئة لتصفية الكتب حسب الفئة
 }
 
-const FeaturedBooks = ({ title, limit = 6, viewAllLink }: FeaturedBooksProps) => {
+const FeaturedBooks = ({ title, limit = 6, viewAllLink, categoryId }: FeaturedBooksProps) => {
   const { language } = useTheme();
   const { t } = useTranslation(language);
-  const [books, setBooks] = useState(language === 'en' ? mockBooks : mockBooksAr);
+  const [books, setBooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Update books when language changes
-    setBooks(language === 'en' ? mockBooks : mockBooksAr);
-  }, [language]);
-
+    // دالة لجلب الكتب من Firebase
+    const fetchBooks = async () => {
+      try {
+        // إنشاء الاستعلام المناسب حسب وجود معرف الفئة
+        let q;
+        if (categoryId) {
+          q = query(collection(db, "books"), where("categoryId", "==", categoryId));
+        } else {
+          q = collection(db, "books");
+        }
+        
+        const querySnapshot = await getDocs(q);
+        const fetchedBooks: any[] = [];
+        
+        querySnapshot.forEach((doc) => {
+          fetchedBooks.push({
+            id: doc.id,
+            ...(doc.data() as Record<string, any>)
+          });
+        });
+        
+        // تحديث localStorage بالبيانات الجديدة
+        localStorage.setItem('adminBooks', JSON.stringify(fetchedBooks));
+        
+        // تعيين الكتب في حالة المكون
+        setBooks(fetchedBooks);
+      } catch (error) {
+        console.error("Error fetching books from Firebase:", error);
+        
+        // في حالة حدوث خطأ، استخدم البيانات المخزنة محلياً أو البيانات الافتراضية
+        const savedBooks = localStorage.getItem('adminBooks');
+        let booksToUse;
+        
+        if (savedBooks) {
+          // إذا كانت هناك كتب في localStorage، استخدمها
+          const allBooks = JSON.parse(savedBooks);
+          
+          // تطبيق التصفية حسب الفئة إذا تم تحديدها
+          if (categoryId) {
+            booksToUse = allBooks.filter((book: any) => book.categoryId === categoryId);
+          } else {
+            booksToUse = allBooks;
+          }
+        } else {
+          // إذا لم تكن هناك كتب في localStorage، استخدم البيانات الوهمية
+          booksToUse = language === 'en' ? mockBooks : mockBooksAr;
+          
+          // تطبيق التصفية حسب الفئة إذا تم تحديدها
+          if (categoryId) {
+            booksToUse = booksToUse.filter((book: any) => book.categoryId === categoryId);
+          }
+        }
+        
+        setBooks(booksToUse);
+      }
+    };
+  
+    // استدعاء دالة جلب الكتب
+    fetchBooks();
+  }, [language, categoryId]);
+  
+  // لا تغيير في الباقي، يبقى كما هو
+  if (books.length === 0) {
+    return (
+      <section className="py-12">
+        <div className="container mx-auto px-4">
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-2xl font-bold">{title}</h2>
+          </div>
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">
+              {language === 'en' ? 'No books available in this category.' : 'لا توجد كتب متاحة في هذه الفئة.'}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  
   return (
     <section className="py-12">
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center mb-8">
           <h2 className="text-2xl font-bold">{title}</h2>
-          {viewAllLink && (
+          {viewAllLink && books.length > limit && (
             <Button variant="outline" asChild>
               <Link to={viewAllLink}>{t('viewAll')}</Link>
             </Button>
           )}
         </div>
-
+  
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
           {books.slice(0, limit).map((book) => (
             <BookCard
@@ -180,6 +273,7 @@ const FeaturedBooks = ({ title, limit = 6, viewAllLink }: FeaturedBooksProps) =>
               coverImage={book.coverImage}
               price={book.price}
               rating={book.rating}
+              originalPrice={book.originalPrice}
             />
           ))}
         </div>
@@ -187,5 +281,4 @@ const FeaturedBooks = ({ title, limit = 6, viewAllLink }: FeaturedBooksProps) =>
     </section>
   );
 };
-
 export default FeaturedBooks;

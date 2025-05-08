@@ -1,4 +1,3 @@
-
 import Layout from "@/components/layout/Layout";
 import Hero from "@/components/home/Hero";
 import FeaturedBooks from "@/components/home/FeaturedBooks";
@@ -20,14 +19,16 @@ const Index = () => {
       />
       <Categories />
       <FeaturedBooks 
-        title={t('newArrivals')} 
+        title={language === 'en' ? 'Fiction Books' : 'كتب الخيال'} 
         limit={6} 
-        viewAllLink="/new-arrivals"
+        viewAllLink="/categories/1"
+        categoryId={1}
       />
       <FeaturedBooks 
-        title={t('bestSellers')} 
+        title={language === 'en' ? 'Science & Technology' : 'العلوم والتكنولوجيا'} 
         limit={6} 
-        viewAllLink="/bestsellers"
+        viewAllLink="/categories/2"
+        categoryId={2}
       />
     </Layout>
   );

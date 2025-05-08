@@ -1,0 +1,11 @@
+[
+  {
+    "origin": [
+      "https://mobe-store-g5a53xatb-moajs-projects-ac0b7f5e.vercel.app",
+      "http://localhost:8080"
+      
+    ],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600
+  }
+]
