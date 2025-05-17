@@ -14,15 +14,15 @@ declare global {
     };
   }
 }
-
 import Layout from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Check, CreditCard, User, Lock } from "lucide-react";
 import { useTheme } from "@/context/theme-context-types";
 import { useTranslation } from "@/translations";
 import { useToast } from "@/hooks/use-toast";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
+import axios from "axios";
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -96,20 +96,12 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
     try {
       const paymentData = {
         price_amount: book.price,
-        price_currency: "usdttrc20", // Changed from "usd" to "usdttrc20" as per supported currencies
-        pay_currency: "usdttrc20",   // Changed from "usdt" to "usdttrc20"
+        price_currency: "usd",
+        pay_currency: "usdt",
         order_id: `ORDER_${user.uid}_${book.id}_${Date.now()}`,
         order_description: `${book.title} from MobeStore`,
-        // Removed ipn_callback_url since it's optional and requires a valid URL
+        ipn_callback_url: "https://yourwebsite.com/ipn",
       };
-
-      // Validate payment data
-      if (!book.price || isNaN(book.price) || book.price <= 0) {
-        throw new Error(language === "en" ? "Invalid book price." : "سعر الكتاب غير صالح.");
-      }
-      if (!book.title) {
-        throw new Error(language === "en" ? "Book title is missing." : "عنوان الكتاب مفقود.");
-      }
 
       const response = await fetch("https://us-central1-mobestore-e1db5.cloudfunctions.net/makePayment", {
         method: "POST",
@@ -120,8 +112,7 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
@@ -133,31 +124,25 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
         script.onload = () => {
           if (window.NOWPayments) {
             window.NOWPayments.init({
-              api_key: apiKey,
+              api_key: apiKey, // هنا ممكن تحتاج API Key عامة (Public Key) لو NOWPayments بتطلبها
               payment_id: data.payment_id,
               container_id: "nowpayments-widget",
-              success_url: `https://mobe-store.web.app/success`, // Updated to deployed URL
-              fail_url: `https://mobe-store.web.app/fail`,       // Updated to deployed URL
+              success_url: `http://localhost:8080/success`,
+              fail_url: `http://localhost:8080/fail`,
             });
-          } else {
-            throw new Error(language === "en" ? "Failed to load NOWPayments widget." : "فشل في تحميل واجهة NOWPayments.");
           }
-        };
-        script.onerror = () => {
-          throw new Error(language === "en" ? "Failed to load NOWPayments script." : "فشل في تحميل سكربت NOWPayments.");
         };
         document.body.appendChild(script);
       } else {
-        throw new Error(
-          language === "en" ? "Failed to create payment. No payment ID returned." : "فشل في إنشاء الدفع. لم يتم إرجاع معرف الدفع."
+        setErrorMessage(
+          language === "en" ? "Failed to create payment. Please try again." : "فشل في إنشاء الدفع. حاول مجددًا."
         );
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error occurred.";
       setErrorMessage(
         language === "en"
-          ? `Failed to process payment. ${errorMsg}`
-          : `فشل في معالجة الدفع. ${errorMsg}`
+          ? `Failed to process payment. ${err instanceof Error ? err.message : "Please try again later."}`
+          : `فشل في معالجة الدفع. ${err instanceof Error ? err.message : "يرجى المحاولة لاحقًا."}`
       );
       console.error("Payment error:", err);
     } finally {
@@ -205,7 +190,7 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
         >
           <div className="flex items-center">
             <CreditCard className="me-3 h-5 w-5 text-green-500 dark:text-green-400" />
-            <span>{language === "en" ? "Cryptocurrency (USDT-TRC20)" : "عملات رقمية (USDT-TRC20)"}</span>
+            <span>{language === "en" ? "Cryptocurrency (USDT)" : "عملات رقمية (USDT)"}</span>
           </div>
           <span className="text-sm text-green-500 dark:text-green-400">Active</span>
         </div>
@@ -367,7 +352,7 @@ const CheckoutPage = () => {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat(language === "en" ? "en-US" : "ar-EG", {
       style: "currency",
-      currency: "USD", // Kept as USD for display purposes, but payment uses usdttrc20
+      currency: "USD",
       minimumFractionDigits: 2,
     }).format(amount || 0);
   };
