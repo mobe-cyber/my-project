@@ -73,14 +73,73 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [selectedCurrency, setSelectedCurrency] = useState("usdttrc20"); // العملة الافتراضية
+  const [convertedPrice, setConvertedPrice] = useState<number | null>(null); // السعر المحول
   const { theme } = useTheme();
   const apiKey = import.meta.env.VITE_NOWPAYMENTS_API_KEY;
+
+  // قايمة العملات المدعومة (اخترنا مجموعة شعبية بناءً على التجارب)
+  const supportedCurrencies = [
+    { id: "usdttrc20", name: "USDT (TRC20)" },
+    { id: "usdtbsc", name: "USDT (BSC)" },
+    { id: "usdc", name: "USDC" },
+    { id: "busdbsc", name: "BUSD (BSC)" },
+    { id: "btc", name: "Bitcoin (BTC)" },
+    { id: "eth", name: "Ethereum (ETH)" },
+    { id: "sol", name: "Solana (SOL)" },
+    { id: "xrp", name: "Ripple (XRP)" },
+    { id: "ltc", name: "Litecoin (LTC)" },
+    { id: "ada", name: "Cardano (ADA)" },
+  ];
 
   useEffect(() => {
     if (user && user.email) {
       setUserEmail(user.email);
     }
   }, [user]);
+
+  // تحويل السعر من USD إلى العملة المختارة
+  const convertUsdToCurrency = async (usdAmount: number, targetCurrency: string) => {
+    try {
+      // تنظيف معرف العملة (مثلاً usdttrc20 -> usdt)
+      let coinId = targetCurrency;
+      if (coinId.includes("trc20")) coinId = coinId.replace("trc20", ""); // USDT TRC20
+      if (coinId.includes("bsc")) coinId = coinId.replace("bsc", ""); // USDT BSC
+      if (coinId === "usdc") coinId = "usd-coin"; // USDC
+      if (coinId === "busd") coinId = "binance-usd"; // BUSD
+      if (coinId === "xrp") coinId = "ripple"; // XRP
+      if (coinId === "ada") coinId = "cardano"; // ADA
+
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`
+      );
+      const data = await response.json();
+      const priceInUsd = data[coinId]?.usd || 0;
+      if (priceInUsd === 0) throw new Error("Invalid currency price");
+      const converted = usdAmount / priceInUsd; // تحويل من USD إلى العملة المختارة
+      return parseFloat(converted.toFixed(8)); // تقريب لـ 8 منازل عشرية
+    } catch (error) {
+      console.error(`Error converting USD to ${targetCurrency}:`, error);
+      throw new Error(
+        language === "en"
+          ? `Failed to convert price to ${targetCurrency.toUpperCase()}.`
+          : `فشل في تحويل السعر إلى ${targetCurrency.toUpperCase()}.`
+      );
+    }
+  };
+
+  // تحديث السعر المحول عند تغيير العملة
+  useEffect(() => {
+    const updateConvertedPrice = async () => {
+      try {
+        const price = await convertUsdToCurrency(book.price, selectedCurrency);
+        setConvertedPrice(price);
+      } catch (error) {
+        setErrorMessage(error.message);
+      }
+    };
+    if (selectedCurrency && book.price) updateConvertedPrice();
+  }, [selectedCurrency, book.price]);
 
   const createNowPayment = async () => {
     if (!userEmail) {
@@ -90,17 +149,36 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
       return;
     }
 
+    if (!convertedPrice) {
+      setErrorMessage(
+        language === "en"
+          ? "Price conversion failed. Please try again."
+          : "فشل تحويل السعر. يرجى المحاولة مرة أخرى."
+      );
+      return;
+    }
+
+    // التحقق من الحد الأدنى (افتراضيًا بناءً على التجارب)
+    const minAmount = selectedCurrency.includes("usdt") || selectedCurrency.includes("usdc") || selectedCurrency.includes("busd") ? 10 : 0.0001;
+    if (convertedPrice < minAmount) {
+      setErrorMessage(
+        language === "en"
+          ? `Amount (${convertedPrice} ${selectedCurrency.toUpperCase()}) is less than the minimum (${minAmount} ${selectedCurrency.toUpperCase()}).`
+          : `المبلغ (${convertedPrice} ${selectedCurrency.toUpperCase()}) أقل من الحد الأدنى (${minAmount} ${selectedCurrency.toUpperCase()}).`
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
 
     try {
       const paymentData = {
-        price_amount: book.price,
-        price_currency: "usd",
-        pay_currency: "usdt",
+        price_amount: convertedPrice,
+        price_currency: selectedCurrency,
+        pay_currency: selectedCurrency,
         order_id: `ORDER_${user.uid}_${book.id}_${Date.now()}`,
         order_description: `${book.title} from MobeStore`,
-        ipn_callback_url: "https://yourwebsite.com/ipn",
       };
 
       const response = await fetch("https://us-central1-mobestore-e1db5.cloudfunctions.net/makePayment", {
@@ -112,7 +190,8 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
       }
 
       const data = await response.json();
@@ -124,25 +203,41 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
         script.onload = () => {
           if (window.NOWPayments) {
             window.NOWPayments.init({
-              api_key: apiKey, // هنا ممكن تحتاج API Key عامة (Public Key) لو NOWPayments بتطلبها
+              api_key: apiKey,
               payment_id: data.payment_id,
               container_id: "nowpayments-widget",
-              success_url: `http://localhost:8080/success`,
-              fail_url: `http://localhost:8080/fail`,
+              success_url: `https://mobe-store.web.app/success`,
+              fail_url: `https://mobe-store.web.app/fail`,
             });
+          } else {
+            throw new Error(
+              language === "en"
+                ? "Failed to load NOWPayments widget."
+                : "فشل في تحميل واجهة NOWPayments."
+            );
           }
+        };
+        script.onerror = () => {
+          throw new Error(
+            language === "en"
+              ? "Failed to load NOWPayments script."
+              : "فشل في تحميل سكربت NOWPayments."
+          );
         };
         document.body.appendChild(script);
       } else {
-        setErrorMessage(
-          language === "en" ? "Failed to create payment. Please try again." : "فشل في إنشاء الدفع. حاول مجددًا."
+        throw new Error(
+          language === "en"
+            ? "Failed to create payment. No payment ID returned."
+            : "فشل في إنشاء الدفع. لم يتم إرجاع معرف الدفع."
         );
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error occurred.";
       setErrorMessage(
         language === "en"
-          ? `Failed to process payment. ${err instanceof Error ? err.message : "Please try again later."}`
-          : `فشل في معالجة الدفع. ${err instanceof Error ? err.message : "يرجى المحاولة لاحقًا."}`
+          ? `Failed to process payment. ${errorMsg}`
+          : `فشل في معالجة الدفع. ${errorMsg}`
       );
       console.error("Payment error:", err);
     } finally {
@@ -186,14 +281,42 @@ const CheckoutForm = ({ book, user, language, t, toast, navigate }) => {
 
         <div
           className="flex items-center justify-between p-4 border border-green-300 dark:border-green-700 rounded-lg bg-green-50 dark:bg-green-900 cursor-pointer hover:bg-green-100 dark:hover:bg-green-800"
-          onClick={createNowPayment}
         >
           <div className="flex items-center">
             <CreditCard className="me-3 h-5 w-5 text-green-500 dark:text-green-400" />
-            <span>{language === "en" ? "Cryptocurrency (USDT)" : "عملات رقمية (USDT)"}</span>
+            <span>{language === "en" ? "Cryptocurrency" : "عملات رقمية"}</span>
           </div>
           <span className="text-sm text-green-500 dark:text-green-400">Active</span>
         </div>
+
+        <div className="flex items-center p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+          <label htmlFor="currency-select" className="me-3 text-gray-600 dark:text-gray-400">
+            {language === "en" ? "Select Currency: " : "اختر العملة: "}
+          </label>
+          <select
+            id="currency-select"
+            value={selectedCurrency}
+            onChange={(e) => setSelectedCurrency(e.target.value)}
+            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none"
+          >
+            {supportedCurrencies.map((currency) => (
+              <option key={currency.id} value={currency.id}>
+                {currency.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {convertedPrice && (
+          <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+            <p className="text-gray-600 dark:text-gray-400">
+              {language === "en" ? "Price in selected currency: " : "السعر بالعملة المختارة: "}
+              <span className="font-semibold text-gray-800 dark:text-gray-200">
+                {convertedPrice} {selectedCurrency.toUpperCase()}
+              </span>
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="mb-6">
