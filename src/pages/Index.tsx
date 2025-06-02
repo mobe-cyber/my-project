@@ -25,7 +25,7 @@ const Index = () => {
         categoryId={1}
       />
       <FeaturedBooks 
-        title={language === 'en' ? 'Science & Technology' : 'العلوم والتكنولوجيا'} 
+        title={language === 'en' ? 'Programming and Cybersecurity' : 'البرمجة والأمن السيبراني'} 
         limit={6} 
         viewAllLink="/categories/2"
         categoryId={2}

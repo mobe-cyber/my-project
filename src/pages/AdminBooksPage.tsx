@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef,  } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,15 +69,13 @@ import {
   writeBatch,
   orderBy,
   limit,
-  startAfter,
-  getDocs,
   Timestamp,
 } from "firebase/firestore";
 import { storage, db, auth } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import * as XLSX from 'xlsx';
+import debounce from 'lodash/debounce';
 
-// واجهة الكتاب
 interface Book {
   id: string;
   title: string;
@@ -97,15 +95,14 @@ interface Book {
   updated_at: Timestamp;
 }
 
-// حجم الصفحة للتصفح
 const PAGE_SIZE = 10;
 
 const AdminBooksPage = () => {
   const { language } = useTheme();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // States
+  const firstFocusableElement = useRef<HTMLButtonElement>(null); // إضافة مرجع لأول عنصر تفاعلي
+
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [dialogAction, setDialogAction] = useState<"add" | "edit">("add");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -125,7 +122,6 @@ const AdminBooksPage = () => {
   const [sortBy, setSortBy] = useState<string>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // الفئات
   const categories = useMemo(
     () => [
       { id: 1, name: language === "en" ? "Fiction" : "الخيال" },
@@ -140,7 +136,6 @@ const AdminBooksPage = () => {
     [language]
   );
 
-  // Form Data
   const [formData, setFormData] = useState({
     title: "",
     author: "",
@@ -157,41 +152,24 @@ const AdminBooksPage = () => {
     inStock: "",
   });
 
-  // جلب الكتب مع التصفح
-  const fetchBooks = useCallback(async (isNewQuery: boolean = false) => {
-    try {
-      let q = query(
-        collection(db, "books"),
-        orderBy(sortBy, sortOrder),
-        limit(PAGE_SIZE)
-      );
+  useEffect(() => {
+    setIsLoading(true);
+    let q = query(collection(db, "books"), orderBy(sortBy, sortOrder), limit(PAGE_SIZE));
 
-      if (categoryFilter) {
-        q = query(q, where("categoryId", "==", parseInt(categoryFilter)));
-      }
+    if (categoryFilter) {
+      q = query(q, where("categoryId", "==", parseInt(categoryFilter)));
+    }
 
-      if (!isNewQuery && lastVisible) {
-        q = query(q, startAfter(lastVisible));
-      }
-
-      const snapshot = await getDocs(q);
-      const lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1];
-      
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const booksData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as Book[];
-
-      if (isNewQuery) {
-        setBooks(booksData);
-      } else {
-        setBooks(prev => [...prev, ...booksData]);
-      }
-
-      setLastVisible(lastVisibleDoc);
+      setBooks(booksData);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
       setHasMore(snapshot.docs.length === PAGE_SIZE);
       setIsLoading(false);
-    } catch (error) {
+    }, (error) => {
       console.error("Error fetching books:", error);
       toast({
         title: language === "en" ? "Error" : "خطأ",
@@ -199,24 +177,22 @@ const AdminBooksPage = () => {
         variant: "destructive",
       });
       setIsLoading(false);
-    }
-  }, [categoryFilter, sortBy, sortOrder, lastVisible, language, toast]);
+    });
 
-  // تحديث القائمة عند تغيير المعايير
-  useEffect(() => {
-    setIsLoading(true);
-    setBooks([]);
-    setLastVisible(null);
-    fetchBooks(true);
-  }, [categoryFilter, sortBy, sortOrder, fetchBooks]);
+    return () => unsubscribe();
+  }, [categoryFilter, sortBy, sortOrder, language, toast]);
 
-  // معالجة تحميل الصورة
+  const debouncedSetSearchTerm = useCallback(
+    debounce((value: string) => setSearchTerm(value), 300),
+    []
+  );
+
   const handleImageUpload = async (file: File) => {
     try {
       const storageRef = ref(storage, `book-covers/${file.name}-${Date.now()}`);
       await uploadBytes(storageRef, file);
       const downloadURL = await getDownloadURL(storageRef);
-      setFormData(prev => ({ ...prev, coverImage: downloadURL }));
+      setFormData((prev) => ({ ...prev, coverImage: downloadURL }));
       setImagePreview(downloadURL);
       toast({
         title: language === "en" ? "Success" : "نجاح",
@@ -232,9 +208,8 @@ const AdminBooksPage = () => {
     }
   };
 
-  // تصدير إلى Excel
   const handleExportToExcel = () => {
-    const exportData = books.map(book => ({
+    const exportData = books.map((book) => ({
       ID: book.id,
       Title: book.title,
       Author: book.author,
@@ -253,16 +228,15 @@ const AdminBooksPage = () => {
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Books");
-    XLSX.writeFile(wb, `books-${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `books-${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
-  // حذف متعدد
   const handleBulkDelete = async () => {
     if (selectedBooks.size === 0) return;
 
     try {
       const batch = writeBatch(db);
-      selectedBooks.forEach(id => {
+      selectedBooks.forEach((id) => {
         const bookRef = doc(db, "books", id);
         batch.delete(bookRef);
       });
@@ -270,11 +244,10 @@ const AdminBooksPage = () => {
       setSelectedBooks(new Set());
       toast({
         title: language === "en" ? "Success" : "نجاح",
-        description: language === "en" 
-          ? `Successfully deleted ${selectedBooks.size} books` 
+        description: language === "en"
+          ? `Successfully deleted ${selectedBooks.size} books`
           : `تم حذف ${selectedBooks.size} كتب بنجاح`,
       });
-      fetchBooks(true);
     } catch (error) {
       console.error("Error in bulk delete:", error);
       toast({
@@ -285,7 +258,6 @@ const AdminBooksPage = () => {
     }
   };
 
-  // فتح نافذة الإضافة
   const handleOpenAddDialog = useCallback(() => {
     setDialogAction("add");
     setFormData({
@@ -304,10 +276,10 @@ const AdminBooksPage = () => {
       inStock: "",
     });
     setImagePreview("");
+    setSelectedBook(null);
     setIsDialogOpen(true);
   }, []);
 
-  // فتح نافذة التعديل
   const handleOpenEditDialog = useCallback((book: Book) => {
     setDialogAction("edit");
     setSelectedBook(book);
@@ -330,21 +302,19 @@ const AdminBooksPage = () => {
     setIsDialogOpen(true);
   }, []);
 
-  // تغيير قيم النموذج
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  // تغيير القيم في Select
   const handleSelectChange = useCallback((value: string, name: string) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  // حفظ الكتاب
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      e.stopPropagation();
 
       if (!formData.title || !formData.author || !formData.price || !formData.coverImage || !formData.categoryId) {
         toast({
@@ -390,8 +360,7 @@ const AdminBooksPage = () => {
             description: language === "en" ? "Book updated successfully" : "تم تحديث الكتاب بنجاح",
           });
         }
-        setIsDialogOpen(false);
-        fetchBooks(true);
+        setIsDialogOpen(false); // إغلاق النافذة
       } catch (error) {
         console.error("Error saving book:", error);
         toast({
@@ -401,10 +370,9 @@ const AdminBooksPage = () => {
         });
       }
     },
-    [dialogAction, formData, selectedBook, language, toast, fetchBooks]
+    [dialogAction, formData, selectedBook, language, toast]
   );
 
-  // حذف كتاب
   const handleDelete = useCallback(
     async (id: string) => {
       try {
@@ -414,7 +382,6 @@ const AdminBooksPage = () => {
           title: language === "en" ? "Success" : "نجاح",
           description: language === "en" ? "Book deleted successfully" : "تم حذف الكتاب بنجاح",
         });
-        fetchBooks(true);
       } catch (error) {
         console.error("Error deleting book:", error);
         toast({
@@ -424,35 +391,42 @@ const AdminBooksPage = () => {
         });
       }
     },
-    [language, toast, fetchBooks]
+    [language, toast]
   );
 
-  // الحصول على اسم الفئة
   const getCategoryName = useCallback((categoryId?: number) => {
     if (!categoryId) return "-";
     const category = categories.find((cat) => cat.id === categoryId);
     return category ? category.name : "-";
   }, [categories]);
 
-  // تصفية الكتب
   const filteredBooks = useMemo(() => {
     return books.filter((book) => {
-      const matchesSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      const matchesSearch =
+        book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         book.author.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesPrice = (!priceRange.min || book.price >= parseFloat(priceRange.min)) &&
+
+      const matchesPrice =
+        (!priceRange.min || book.price >= parseFloat(priceRange.min)) &&
         (!priceRange.max || book.price <= parseFloat(priceRange.max));
-      
-      const matchesRating = !ratingFilter ||
+
+      const matchesRating =
+        !ratingFilter ||
         (book.rating && book.rating >= parseFloat(ratingFilter));
 
       return matchesSearch && matchesPrice && matchesRating;
     });
   }, [books, searchTerm, priceRange, ratingFilter]);
 
+  // إعادة التركيز بعد إغلاق الـ Dialog
+  const restoreFocus = () => {
+    if (firstFocusableElement.current) {
+      firstFocusableElement.current.focus();
+    }
+  };
+
   return (
     <div className="space-y-6 p-6">
-      {/* رأس الصفحة */}
       <div className="flex justify-between items-center flex-col md:flex-row gap-4">
         <h1 className="text-3xl font-bold text-foreground">
           {language === "en" ? "Manage Books" : "إدارة الكتب"}
@@ -462,8 +436,7 @@ const AdminBooksPage = () => {
             <Input
               type="text"
               placeholder={language === "en" ? "Search books..." : "ابحث عن كتب..."}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => debouncedSetSearchTerm(e.target.value)}
               className="pl-10 w-full"
             />
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
@@ -473,39 +446,33 @@ const AdminBooksPage = () => {
             {language === "en" ? "Filters" : "التصفية"}
           </Button>
           <Select value={categoryFilter || "all"} onValueChange={setCategoryFilter}>
-  <SelectTrigger className="w-[180px]">
-    <SelectValue placeholder={language === "en" ? "Filter by Category" : "تصفية حسب الفئة"} />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="all">
-      {language === "en" ? "All Categories" : "جميع الفئات"}
-    </SelectItem>
-    {categories.map((category) => (
-      <SelectItem key={category.id} value={category.id.toString()}>
-        {category.name}
-      </SelectItem>
-    ))}
-  </SelectContent>
-</Select>
-          <Button onClick={handleOpenAddDialog}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder={language === "en" ? "Filter by Category" : "تصفية حسب الفئة"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                {language === "en" ? "All Categories" : "جميع الفئات"}
+              </SelectItem>
+              {categories.map((category) => (
+                <SelectItem key={category.id} value={category.id.toString()}>
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button ref={firstFocusableElement} onClick={handleOpenAddDialog}>
             <BookPlus className="h-5 w-5 mr-2" />
             {language === "en" ? "Add New Book" : "إضافة كتاب جديد"}
           </Button>
         </div>
       </div>
 
-      {/* أزرار الإجراءات */}
       <div className="flex justify-between items-center">
         <div className="flex gap-2">
           {selectedBooks.size > 0 && (
-            <Button
-              variant="destructive"
-              onClick={() => setIsDeleteDialogOpen(true)}
-            >
+            <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)}>
               <Trash2 className="h-4 w-4 mr-2" />
-              {language === "en"
-                ? `Delete Selected (${selectedBooks.size})`
-                : `حذف المحدد (${selectedBooks.size})`}
+              {language === "en" ? `Delete Selected (${selectedBooks.size})` : `حذف المحدد (${selectedBooks.size})`}
             </Button>
           )}
         </div>
@@ -515,7 +482,6 @@ const AdminBooksPage = () => {
         </Button>
       </div>
 
-      {/* جدول الكتب */}
       {isLoading ? (
         <div className="text-center text-muted-foreground">
           {language === "en" ? "Loading..." : "جاري التحميل..."}
@@ -534,9 +500,7 @@ const AdminBooksPage = () => {
                     checked={selectedBooks.size === filteredBooks.length}
                     onCheckedChange={(checked) => {
                       if (checked) {
-                        setSelectedBooks(
-                          new Set(filteredBooks.map((book) => book.id))
-                        );
+                        setSelectedBooks(new Set(filteredBooks.map((book) => book.id)));
                       } else {
                         setSelectedBooks(new Set());
                       }
@@ -640,21 +604,35 @@ const AdminBooksPage = () => {
         </div>
       )}
 
-      {/* زر تحميل المزيد */}
-      {hasMore && (
-        <div className="text-center mt-4">
-          <Button
-            variant="outline"
-            onClick={() => fetchBooks()}
-            disabled={isLoading}
-          >
-            {language === "en" ? "Load More" : "تحميل المزيد"}
-          </Button>
-        </div>
-      )}
-
-      {/* نموذج إضافة/تعديل الكتاب */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog 
+        open={isDialogOpen} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsDialogOpen(false);
+            restoreFocus(); // إعادة التركيز لأول عنصر تفاعلي
+            setFormData({
+              title: "",
+              author: "",
+              price: "",
+              coverImage: "",
+              rating: "",
+              originalPrice: "",
+              categoryId: "",
+              description: "",
+              publishDate: "",
+              isbn: "",
+              language: "",
+              pageCount: "",
+              inStock: "",
+            });
+            setImagePreview("");
+            setSelectedBook(null);
+            setDialogAction("add");
+          } else {
+            setIsDialogOpen(true);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>
@@ -682,12 +660,11 @@ const AdminBooksPage = () => {
                   id="title"
                   name="title"
                   value={formData.title}
-                  onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                  onChange={handleChange}
                   required
                   placeholder={language === "en" ? "Enter title" : "أدخل العنوان"}
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="author">
                   {language === "en" ? "Author" : "المؤلف"} *
@@ -696,12 +673,11 @@ const AdminBooksPage = () => {
                   id="author"
                   name="author"
                   value={formData.author}
-                  onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                  onChange={handleChange}
                   required
                   placeholder={language === "en" ? "Enter author" : "أدخل المؤلف"}
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="categoryId">
                   {language === "en" ? "Category" : "الفئة"} *
@@ -726,7 +702,6 @@ const AdminBooksPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="description">
                   {language === "en" ? "Description" : "الوصف"}
@@ -735,7 +710,7 @@ const AdminBooksPage = () => {
                   id="description"
                   name="description"
                   value={formData.description}
-                  onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                  onChange={handleChange}
                   placeholder={
                     language === "en"
                       ? "Enter description"
@@ -743,7 +718,6 @@ const AdminBooksPage = () => {
                   }
                 />
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="price">
@@ -755,7 +729,7 @@ const AdminBooksPage = () => {
                     type="number"
                     step="0.01"
                     value={formData.price}
-                    onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                    onChange={handleChange}
                     required
                     placeholder="0.00"
                   />
@@ -770,12 +744,11 @@ const AdminBooksPage = () => {
                     type="number"
                     step="0.01"
                     value={formData.originalPrice}
-                    onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                    onChange={handleChange}
                     placeholder="0.00"
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="rating">
@@ -789,7 +762,7 @@ const AdminBooksPage = () => {
                     max="5"
                     step="0.1"
                     value={formData.rating}
-                    onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement>)}
+                    onChange={handleChange}
                     placeholder="0.0"
                   />
                 </div>
@@ -808,7 +781,6 @@ const AdminBooksPage = () => {
                   />
                 </div>
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="isbn">ISBN</Label>
                 <Input
@@ -819,7 +791,6 @@ const AdminBooksPage = () => {
                   placeholder="ISBN"
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="language">
                   {language === "en" ? "Language" : "اللغة"}
@@ -832,7 +803,6 @@ const AdminBooksPage = () => {
                   placeholder={language === "en" ? "Book language" : "لغة الكتاب"}
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="publishDate">
                   {language === "en" ? "Publish Date" : "تاريخ النشر"}
@@ -845,7 +815,6 @@ const AdminBooksPage = () => {
                   onChange={handleChange}
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label>
                   {language === "en" ? "Cover Image" : "صورة الغلاف"} *
@@ -908,14 +877,11 @@ const AdminBooksPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* نافذة تأكيد الحذف */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {language === "en"
-                ? "Are you sure?"
-                : "هل أنت متأكد؟"}
+              {language === "en" ? "Are you sure?" : "هل أنت متأكد؟"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {language === "en"
@@ -934,7 +900,6 @@ const AdminBooksPage = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* نافذة التصفية المتقدمة */}
       <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -966,7 +931,6 @@ const AdminBooksPage = () => {
                 />
               </div>
             </div>
-
             <div className="grid gap-2">
               <Label>
                 {language === "en" ? "Minimum Rating" : "الحد الأدنى للتقييم"}
@@ -995,7 +959,6 @@ const AdminBooksPage = () => {
                 </SelectContent>
               </Select>
             </div>
-
             <div className="grid gap-2">
               <Label>{language === "en" ? "Sort By" : "ترتيب حسب"}</Label>
               <Select value={sortBy} onValueChange={setSortBy}>
@@ -1022,7 +985,6 @@ const AdminBooksPage = () => {
                 </SelectContent>
               </Select>
             </div>
-
             <div className="grid gap-2">
               <Label>{language === "en" ? "Sort Order" : "اتجاه الترتيب"}</Label>
               <Select
@@ -1051,7 +1013,7 @@ const AdminBooksPage = () => {
             <Button
               onClick={() => {
                 setIsFilterDialogOpen(false);
-                fetchBooks(true);
+                setBooks([]);
               }}
             >
               {language === "en" ? "Apply Filters" : "تطبيق التصفية"}

@@ -8,7 +8,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
 import { useToast } from "@/hooks/use-toast";
 import { auth } from "@/lib/firebase";
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 const CartPage = () => {
@@ -20,30 +20,39 @@ const CartPage = () => {
   const [promoCode, setPromoCode] = useState("");
   const [isPromoApplied, setIsPromoApplied] = useState(false);
   const [discount, setDiscount] = useState(0);
+  const [loading, setLoading] = useState(true); // حالة للتحميل الأولي
+  const [dataLoaded, setDataLoaded] = useState(false); // حالة للتأكد من جاهزية البيانات
 
   useEffect(() => {
-    if (!user) return;
+    // إذا لم يكن هناك مستخدم، نوقف العملية ونحدث حالة التحميل
+    if (!user) {
+      setLoading(false);
+      setDataLoaded(true);
+      return;
+    }
 
     const fetchCart = async () => {
-      const cartRef = collection(db, "carts");
-      const q = query(cartRef, where("userId", "==", user.uid));
-      const querySnapshot = await getDocs(q);
-      const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setCartItems(items);
+      try {
+        const cartRef = collection(db, "carts");
+        const q = query(cartRef, where("userId", "==", user.uid));
+        const querySnapshot = await getDocs(q);
+        const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCartItems(items);
+      } catch (error) {
+        console.error("Error fetching cart:", error);
+        toast({
+          title: language === "en" ? "Error" : "خطأ",
+          description: language === "en" ? "Failed to load cart items." : "فشل في تحميل عناصر السلة.",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+        setDataLoaded(true); // البيانات جاهزة سواء نجحت أو فشلت العملية
+      }
     };
 
     fetchCart();
-  }, [user]);
-
-  const handleQuantityChange = async (id: string, newQuantity: number) => {
-    if (newQuantity < 1) return;
-
-    const itemRef = doc(db, "carts", id);
-    await updateDoc(itemRef, { quantity: newQuantity });
-    setCartItems(prevItems =>
-      prevItems.map(item => (item.id === id ? { ...item, quantity: newQuantity } : item))
-    );
-  };
+  }, [user, toast, language]);
 
   const handleRemoveItem = async (id: string) => {
     const itemRef = doc(db, "carts", id);
@@ -74,7 +83,7 @@ const CartPage = () => {
     }
   };
 
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + (item.price || 0), 0);
   const discountAmount = isPromoApplied ? subtotal * discount : 0;
   const total = subtotal - discountAmount;
 
@@ -85,6 +94,35 @@ const CartPage = () => {
       minimumFractionDigits: 2,
     }).format(amount);
   };
+
+  // عرض شاشة تحميل أثناء جلب البيانات
+  if (loading || !dataLoaded) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-12 text-center">
+          <span className="animate-pulse text-gray-600 dark:text-gray-400">
+            {language === "en" ? "Loading..." : "جاري التحميل..."}
+          </span>
+        </div>
+      </Layout>
+    );
+  }
+
+  // إذا لم يكن هناك مستخدم، نعرض رسالة تسجيل الدخول
+  if (!user) {
+    return (
+      <Layout>
+        <div className="container mx-auto px-4 py-12 text-center">
+          {language === "en" ? "Please sign in to view your cart." : "يرجى تسجيل الدخول لعرض سلة التسوق."}
+          <Button className="mt-4" asChild>
+            <Link to="/login">
+              {language === "en" ? "Sign In" : "تسجيل الدخول"}
+            </Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -119,7 +157,6 @@ const CartPage = () => {
                     <tr>
                       <th className="text-start p-4">{language === 'en' ? 'Product' : 'المنتج'}</th>
                       <th className="text-start p-4 hidden sm:table-cell">{language === 'en' ? 'Price' : 'السعر'}</th>
-                      <th className="text-start p-4">{language === 'en' ? 'Quantity' : 'الكمية'}</th>
                       <th className="text-start p-4 hidden sm:table-cell">{language === 'en' ? 'Total' : 'المجموع'}</th>
                       <th className="p-4"><span className="sr-only">{language === 'en' ? 'Actions' : 'إجراءات'}</span></th>
                     </tr>
@@ -145,31 +182,8 @@ const CartPage = () => {
                         <td className="p-4 hidden sm:table-cell">
                           {formatCurrency(item.price)}
                         </td>
-                        <td className="p-4">
-                          <div className="flex items-center">
-                            <button
-                              className="w-8 h-8 flex items-center justify-center border border-border rounded-s"
-                              onClick={() => handleQuantityChange(item.id, (item.quantity || 1) - 1)}
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity || 1}
-                              onChange={(e) => handleQuantityChange(item.id, parseInt(e.target.value) || 1)}
-                              className="w-12 h-8 border-y border-border text-center focus:outline-none"
-                            />
-                            <button
-                              className="w-8 h-8 flex items-center justify-center border border-border rounded-e"
-                              onClick={() => handleQuantityChange(item.id, (item.quantity || 1) + 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </td>
                         <td className="p-4 hidden sm:table-cell">
-                          {formatCurrency((item.price || 0) * (item.quantity || 1))}
+                          {formatCurrency(item.price)}
                         </td>
                         <td className="p-4 text-center">
                           <button onClick={() => handleRemoveItem(item.id)} className="text-muted-foreground hover:text-destructive">
@@ -244,7 +258,7 @@ const CartPage = () => {
                 </div>
                 
                 <Button className="w-full" asChild>
-                  <Link to="/checkout" className="flex items-center justify-center gap-2">
+                  <Link to="/checkout" state={{ cartItems }} className="flex items-center justify-center gap-2">
                     {language === 'en' ? 'Proceed to Checkout' : 'متابعة الدفع'}
                     <ArrowRight className={`h-4 w-4 ${language === 'ar' ? 'rotate-180' : ''}`} />
                   </Link>

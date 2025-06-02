@@ -41,10 +41,10 @@ const CategoriesPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // قائمة الفئات الثابتة (يمكن استبدالها بجلب من Firestore لاحقًا)
+  // قائمة الفئات الثابتة
   const categoriesEn = [
     { id: 1, name: "Fiction", count: 0, icon: "📚" },
-    { id: 2, name: "Science & Technology", count: 0, icon: "🔬" },
+    { id: 2, name: "Programming and Cybersecurity", count: 0, icon: "👨‍💻🔐" },
     { id: 3, name: "Business", count: 0, icon: "💼" },
     { id: 4, name: "Self Development", count: 0, icon: "🌱" },
     { id: 5, name: "Biography", count: 0, icon: "👤" },
@@ -55,7 +55,7 @@ const CategoriesPage = () => {
 
   const categoriesAr = [
     { id: 1, name: "الخيال", count: 0, icon: "📚" },
-    { id: 2, name: "العلوم والتكنولوجيا", count: 0, icon: "🔬" },
+    { id: 2, name: "البرمجة والأمن السيبراني", count: 0, icon: "👨‍💻🔐" },
     { id: 3, name: "الأعمال", count: 0, icon: "💼" },
     { id: 4, name: "تطوير الذات", count: 0, icon: "🌱" },
     { id: 5, name: "السيرة الذاتية", count: 0, icon: "👤" },
@@ -70,25 +70,37 @@ const CategoriesPage = () => {
         setIsLoading(true);
         setError(null);
 
+        // جلب كل الكتب لحساب عدد الكتب في كل فئة
+        const booksCollection = collection(db, "books");
+        const allBooksSnapshot = await getDocs(booksCollection);
+        const allBooksData: Book[] = allBooksSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...(doc.data() as Record<string, unknown>),
+        })) as Book[];
+
         // تحديد الفئات بناءً على اللغة
         const baseCategories = language === "en" ? categoriesEn : categoriesAr;
-        setCategories(baseCategories);
 
-        // جلب الكتب من Firestore
-        const booksCollection = collection(db, "books");
+        // تحديث عدد الكتب في كل فئة بناءً على كل الكتب
+        const updatedCategories = baseCategories.map((category) => {
+          const count = allBooksData.filter(
+            (book) => book.categoryId === category.id && book.price <= priceRange
+          ).length;
+          return { ...category, count };
+        });
+        setCategories(updatedCategories);
+
+        // جلب الكتب المفلترة بناءً على الفئة المحددة
         let booksQuery;
-
-        // فلترة بناءً على التصنيف إذا كان موجود
         if (categoryId) {
           const catId = parseInt(categoryId);
           booksQuery = query(booksCollection, where("categoryId", "==", catId));
-          const category = baseCategories.find((cat) => cat.id === catId);
+          const category = updatedCategories.find((cat) => cat.id === catId);
           setSelectedCategory(category || null);
         } else {
-          booksQuery = booksCollection; // كل الكتب إذا ما فيش تصنيف
+          booksQuery = booksCollection; // كل الكتب إذا لم يكن هناك تصنيف
         }
 
-        // تنفيذ الاستعلام
         const booksSnapshot = await getDocs(booksQuery);
         const booksData: Book[] = booksSnapshot.docs.map((doc) => ({
           id: doc.id,
@@ -97,15 +109,7 @@ const CategoriesPage = () => {
 
         // فلترة بناءً على نطاق السعر
         const filteredBooks = booksData.filter((book) => book.price <= priceRange);
-
         setBooks(filteredBooks);
-
-        // تحديث عدد الكتب في كل فئة
-        const updatedCategories = baseCategories.map((category) => {
-          const count = filteredBooks.filter((book) => book.categoryId === category.id).length;
-          return { ...category, count };
-        });
-        setCategories(updatedCategories);
       } catch (error) {
         console.error("Error fetching books:", error);
         setError(
@@ -129,7 +133,7 @@ const CategoriesPage = () => {
       case "price-high":
         return b.price - a.price;
       case "rating":
-        return b.rating - a.rating;
+        return (b.rating || 0) - (a.rating || 0);
       default: // featured
         return 0;
     }
@@ -143,22 +147,28 @@ const CategoriesPage = () => {
           <div className="lg:w-1/4">
             <div className="sticky top-24 bg-card border border-border rounded-lg p-6 shadow-md">
               <h2 className="text-xl font-bold mb-4 text-foreground">{t("categories")}</h2>
-              <div className="space-y-2">
-                {categories.map((category) => (
-                  <Link
-                    key={category.id}
-                    to={`/categories/${category.id}`}
-                    className={`block p-2 rounded-md hover:bg-accent transition-colors ${
-                      selectedCategory?.id === category.id
-                        ? "bg-accent text-accent-foreground font-semibold"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    <span className="mr-2">{category.icon}</span>
-                    {category.name} ({category.count})
-                  </Link>
-                ))}
-              </div>
+              {isLoading ? (
+                <div className="text-center text-muted-foreground">
+                  {language === "en" ? "Loading..." : "جاري التحميل..."}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {categories.map((category) => (
+                    <Link
+                      key={category.id}
+                      to={`/categories/${category.id}`}
+                      className={`block p-2 rounded-md hover:bg-accent transition-colors ${
+                        selectedCategory?.id === category.id
+                          ? "bg-accent text-accent-foreground font-semibold"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      <span className="mr-2">{category.icon}</span>
+                      {category.name} ({category.count})
+                    </Link>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-8">
                 <h3 className="font-semibold mb-2 text-foreground">
@@ -254,9 +264,7 @@ const CategoriesPage = () => {
               </p>
             </div>
 
-            {error && (
-              <div className="text-center text-red-500 mb-4">{error}</div>
-            )}
+            {error && <div className="text-center text-red-500 mb-4">{error}</div>}
 
             {!categoryId && (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mb-12">

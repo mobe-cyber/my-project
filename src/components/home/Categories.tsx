@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase";
 // فئات المكتبة
 const categoriesEn = [
   { id: 1, name: "Fiction", count: 0, icon: "📚" },
-  { id: 2, name: "Science & Technology", count: 0, icon: "🔬" },
+  { id: 2, name: "Programming and Cybersecurity", count: 0, icon: "👨‍💻🔐" },
   { id: 3, name: "Business", count: 0, icon: "💼" },
   { id: 4, name: "Self Development", count: 0, icon: "🌱" },
   { id: 5, name: "Biography", count: 0, icon: "👤" },
@@ -18,7 +18,7 @@ const categoriesEn = [
 
 const categoriesAr = [
   { id: 1, name: "الخيال", count: 0, icon: "📚" },
-  { id: 2, name: "العلوم والتكنولوجيا", count: 0, icon: "🔬" },
+  { id: 2, name: "البرمجة واالأمن السيبراني", count: 0, icon: "👨‍💻🔐" },
   { id: 3, name: "الأعمال", count: 0, icon: "💼" },
   { id: 4, name: "تطوير الذات", count: 0, icon: "🌱" },
   { id: 5, name: "السيرة الذاتية", count: 0, icon: "👤" },

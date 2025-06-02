@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -45,6 +46,7 @@ const AdminLoginPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { language } = useTheme();
+  const { user, loading: authLoading } = useAuth();
   const [credentials, setCredentials] = useState<Credentials>({
     email: "",
     password: "",
@@ -60,61 +62,14 @@ const AdminLoginPage = () => {
     password?: string;
   }>({});
   const hasNavigated = useRef(false);
-  const mounted = useRef(false);
 
   useEffect(() => {
-    mounted.current = true;
-    console.log("Checking authentication state...");
-
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (!mounted.current) return;
-
-      if (user && !hasNavigated.current) {
-        try {
-          console.log("User found:", user.email);
-          const token = await getIdTokenResult(user, true);
-          console.log("Token claims:", token.claims);
-
-          if (token.claims && token.claims.admin === true) {
-            console.log("Admin privileges confirmed");
-            hasNavigated.current = true;
-            navigate("/admin/dashboard", { replace: true });
-          } else {
-            console.log("No admin privileges found");
-            await auth.signOut();
-            if (mounted.current) {
-              toast({
-                title: language === "en" ? "Access Denied" : "تم رفض الوصول",
-                description: language === "en" 
-                  ? "You do not have admin privileges" 
-                  : "ليس لديك صلاحيات المسؤول",
-                variant: "destructive",
-              });
-            }
-          }
-        } catch (error) {
-          console.error("Auth check error:", error);
-          if (mounted.current) {
-            toast({
-              title: language === "en" ? "Error" : "خطأ",
-              description: language === "en"
-                ? "Error verifying admin status"
-                : "خطأ في التحقق من صلاحيات المسؤول",
-              variant: "destructive",
-            });
-          }
-        }
-      }
-    });
-
-    return () => {
-      mounted.current = false;
-      unsubscribe();
-    };
-  }, [navigate, toast, language]);
+    if (user && user.email && !authLoading) {
+      navigate("/admin/dashboard", { replace: true });
+    }
+  }, [user, navigate, authLoading]);
 
   useEffect(() => {
-    mounted.current = true;
     const blockedUntil = localStorage.getItem("adminLoginBlockedUntil");
     const storedFailedAttempts = localStorage.getItem("adminLoginFailedAttempts");
 
@@ -123,20 +78,14 @@ const AdminLoginPage = () => {
       setFailedAttempts(Number(storedFailedAttempts || 0));
 
       const timeoutId = setTimeout(() => {
-        if (mounted.current) {
-          setIsBlocked(false);
-          setFailedAttempts(0);
-          localStorage.removeItem("adminLoginBlockedUntil");
-          localStorage.removeItem("adminLoginFailedAttempts");
-        }
+        setIsBlocked(false);
+        setFailedAttempts(0);
+        localStorage.removeItem("adminLoginBlockedUntil");
+        localStorage.removeItem("adminLoginFailedAttempts");
       }, Number(blockedUntil) - Date.now());
 
       return () => clearTimeout(timeoutId);
     }
-
-    return () => {
-      mounted.current = false;
-    };
   }, []);
 
   const validateEmail = (email: string): boolean => {
@@ -315,6 +264,14 @@ const AdminLoginPage = () => {
     const message = messages[errorCode] || messages["default"];
     return language === "en" ? message.en : message.ar;
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <motion.div

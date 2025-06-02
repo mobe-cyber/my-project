@@ -1,148 +1,80 @@
-
 import { useState, useEffect } from "react";
 import Layout from "@/components/layout/Layout";
 import BookCard from "@/components/books/BookCard";
 import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
 import { Tag, Percent } from "lucide-react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-// Mock data for books on offer
-const offersEn = [
-  {
-    id: 201,
-    title: "The Alchemist",
-    author: "Paulo Coelho",
-    coverImage: "https://picsum.photos/seed/alchemist1/300/400",
-    price: 9.99,
-    originalPrice: 14.99,
-    discount: 33,
-    rating: 4.8,
-  },
-  {
-    id: 202,
-    title: "The Silent Patient",
-    author: "Alex Michaelides",
-    coverImage: "https://picsum.photos/seed/patient1/300/400",
-    price: 8.99,
-    originalPrice: 16.99,
-    discount: 47,
-    rating: 4.6,
-  },
-  {
-    id: 203,
-    title: "Educated: A Memoir",
-    author: "Tara Westover",
-    coverImage: "https://picsum.photos/seed/educated1/300/400",
-    price: 10.99,
-    originalPrice: 18.99,
-    discount: 42,
-    rating: 4.7,
-  },
-  {
-    id: 204,
-    title: "Where the Crawdads Sing",
-    author: "Delia Owens",
-    coverImage: "https://picsum.photos/seed/crawdads1/300/400",
-    price: 7.99,
-    originalPrice: 15.99,
-    discount: 50,
-    rating: 4.5,
-  },
-  {
-    id: 205,
-    title: "Becoming",
-    author: "Michelle Obama",
-    coverImage: "https://picsum.photos/seed/becoming1/300/400",
-    price: 11.99,
-    originalPrice: 19.99,
-    discount: 40,
-    rating: 4.9,
-  },
-  {
-    id: 206,
-    title: "Sapiens",
-    author: "Yuval Noah Harari",
-    coverImage: "https://picsum.photos/seed/sapiens1/300/400",
-    price: 12.99,
-    originalPrice: 22.99,
-    discount: 43,
-    rating: 4.8,
-  }
-];
-
-// Arabic titles and authors for the same books
-const offersAr = [
-  {
-    id: 201,
-    title: "الخيميائي",
-    author: "باولو كويلو",
-    coverImage: "https://picsum.photos/seed/alchemist1/300/400",
-    price: 9.99,
-    originalPrice: 14.99,
-    discount: 33,
-    rating: 4.8,
-  },
-  {
-    id: 202,
-    title: "المريضة الصامتة",
-    author: "أليكس ميخاليدس",
-    coverImage: "https://picsum.photos/seed/patient1/300/400",
-    price: 8.99,
-    originalPrice: 16.99,
-    discount: 47,
-    rating: 4.6,
-  },
-  {
-    id: 203,
-    title: "متعلمة: مذكرات",
-    author: "تارا ويستوفر",
-    coverImage: "https://picsum.photos/seed/educated1/300/400",
-    price: 10.99,
-    originalPrice: 18.99,
-    discount: 42,
-    rating: 4.7,
-  },
-  {
-    id: 204,
-    title: "حيث تغني سرطانات النهر",
-    author: "ديليا أوينز",
-    coverImage: "https://picsum.photos/seed/crawdads1/300/400",
-    price: 7.99,
-    originalPrice: 15.99,
-    discount: 50,
-    rating: 4.5,
-  },
-  {
-    id: 205,
-    title: "أن تصبح",
-    author: "ميشيل أوباما",
-    coverImage: "https://picsum.photos/seed/becoming1/300/400",
-    price: 11.99,
-    originalPrice: 19.99,
-    discount: 40,
-    rating: 4.9,
-  },
-  {
-    id: 206,
-    title: "العاقل",
-    author: "يوفال نوح هراري",
-    coverImage: "https://picsum.photos/seed/sapiens1/300/400",
-    price: 12.99,
-    originalPrice: 22.99,
-    discount: 43,
-    rating: 4.8,
-  }
-];
+// Function to generate a random discount between 10 and 50
+const generateRandomDiscount = () => Math.floor(Math.random() * (50 - 10 + 1)) + 10;
 
 const OffersPage = () => {
   const { language } = useTheme();
   const { t } = useTranslation(language);
-  const [offers, setOffers] = useState(language === 'en' ? offersEn : offersAr);
-  
-  // Update offers when language changes
+  const [offers, setOffers] = useState<any[]>([]);
+
   useEffect(() => {
-    setOffers(language === 'en' ? offersEn : offersAr);
-  }, [language]);
+    const fetchBooks = async () => {
+      try {
+        const booksRef = collection(db, "books");
+        const querySnapshot = await getDocs(booksRef);
+
+        const fetchedBooks: any[] = [];
+        querySnapshot.forEach((doc) => {
+          const bookData = doc.data();
+          fetchedBooks.push({
+            id: doc.id,
+            title: bookData.title,
+            author: bookData.author,
+            coverImage: bookData.coverImage,
+            price: bookData.price,
+            rating: bookData.rating,
+          });
+        });
+
+        // Check if discount data exists in localStorage
+        const storedDiscounts = localStorage.getItem("offerDiscounts");
+        let booksWithOffers;
+
+        if (storedDiscounts) {
+          // If discounts exist, use them
+          const discountsData = JSON.parse(storedDiscounts);
+          booksWithOffers = fetchedBooks.map((book) => {
+            const discount = discountsData[book.id] || generateRandomDiscount();
+            const originalPrice = book.price / (1 - discount / 100); // Calculate original price
+            return {
+              ...book,
+              discount,
+              originalPrice: Number(originalPrice.toFixed(2)),
+            };
+          });
+        } else {
+          // If no discounts, generate new ones and store them
+          const discountsData: { [key: string]: number } = {};
+          booksWithOffers = fetchedBooks.map((book) => {
+            const discount = generateRandomDiscount();
+            const originalPrice = book.price / (1 - discount / 100); // Calculate original price
+            discountsData[book.id] = discount;
+            return {
+              ...book,
+              discount,
+              originalPrice: Number(originalPrice.toFixed(2)),
+            };
+          });
+          localStorage.setItem("offerDiscounts", JSON.stringify(discountsData));
+        }
+
+        setOffers(booksWithOffers);
+      } catch (error) {
+        console.error("Error fetching books from Firestore:", error);
+        setOffers([]);
+      }
+    };
+
+    fetchBooks();
+  }, []);
 
   return (
     <Layout>
@@ -156,13 +88,13 @@ const OffersPage = () => {
               {language === 'en' ? 'Special Offers' : 'عروض خاصة'}
             </h1>
             <p className="text-muted-foreground">
-              {language === 'en' 
-                ? 'Limited time discounts on popular titles' 
+              {language === 'en'
+                ? 'Limited time discounts on popular titles'
                 : 'خصومات لفترة محدودة على العناوين الشهيرة'}
             </p>
           </div>
         </div>
-        
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {offers.map((book) => (
             <div key={book.id} className="relative">

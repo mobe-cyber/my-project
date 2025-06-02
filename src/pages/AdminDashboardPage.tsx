@@ -26,6 +26,7 @@ import {
   Clock,
   Search,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { FixedSizeList as VirtualizedList } from 'react-window';
 import BookCard from "@/components/books/BookCard";
@@ -39,7 +40,6 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
-import { getIdTokenResult } from "firebase/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
   Area,
@@ -50,6 +50,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useAuth } from "@/context/AuthContext";
+import { verifyAdminClaims } from "@/lib/admin-auth-utils";
 
 // واجهات البيانات
 interface Book {
@@ -98,7 +100,8 @@ const AdminDashboardPage = () => {
   const { language } = useTheme();
   const { toast } = useToast();
   const navigate = useNavigate();
-  
+  const { user, loading: authLoading } = useAuth();
+
   // States
   const [stats, setStats] = useState<Stat[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
@@ -106,57 +109,54 @@ const AdminDashboardPage = () => {
   const [recentUsers, setRecentUsers] = useState<User[]>([]);
   const [salesData, setSalesData] = useState<SalesData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<"week" | "month" | "year">("month");
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
   // التحقق من صلاحيات المسؤول
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        setIsAuthenticated(true);
-        try {
-          const tokenResult = await getIdTokenResult(user);
-          const isAdminUser = !!tokenResult.claims.admin;
-          setIsAdmin(isAdminUser);
-          if (!isAdminUser) {
-            toast({
-              title: language === "en" ? "Access Denied" : "تم رفض الوصول",
-              description: language === "en" 
-                ? "You don't have admin privileges." 
-                : "ليس لديك صلاحيات المسؤول.",
-              variant: "destructive",
-            });
-            navigate("/");
-          }
-        } catch (error) {
-          console.error("Error checking admin status:", error);
-          setError(
-            language === "en"
-              ? "Failed to verify admin permissions."
-              : "فشل التحقق من صلاحيات المسؤول."
-          );
-          setIsAdmin(false);
+    const checkAdminStatus = async () => {
+      if (authLoading || !user) return;
+
+      try {
+        const adminStatus = await verifyAdminClaims(user);
+        setIsAdmin(adminStatus);
+        if (!adminStatus) {
+          toast({
+            title: language === "en" ? "Access Denied" : "تم رفض الوصول",
+            description: language === "en"
+              ? "You don't have admin privileges."
+              : "ليس لديك صلاحيات المسؤول.",
+            variant: "destructive",
+          });
+          navigate("/admin/login");
         }
-      } else {
-        setIsAuthenticated(false);
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+        setError(
+          language === "en"
+            ? "Failed to verify admin permissions."
+            : "فشل التحقق من صلاحيات المسؤول."
+        );
         setIsAdmin(false);
-        navigate("/login");
+        navigate("/admin/login");
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    });
-    return () => unsubscribe();
-  }, [language, navigate, toast]);
+    };
+
+    checkAdminStatus();
+  }, [user, authLoading, language, navigate, toast]);
 
   // جلب البيانات من Firestore
   const fetchData = useCallback(async () => {
-    if (!isAuthenticated || !isAdmin) return;
+    if (!user || !isAdmin) return;
 
     try {
-      setIsLoading(true);
+      setDataLoading(true);
       setError(null);
 
       // جلب الكتب مع الترتيب حسب تاريخ الإضافة
@@ -207,7 +207,7 @@ const AdminDashboardPage = () => {
         orderBy("date", "asc")
       );
       const salesChartSnapshot = await getDocs(salesChartQuery);
-      
+
       // تجميع المبيعات حسب اليوم
       const salesByDay = salesChartSnapshot.docs.reduce((acc, doc) => {
         const sale = doc.data() as Sale;
@@ -257,7 +257,7 @@ const AdminDashboardPage = () => {
           value: (
             booksData.reduce((sum, book) => sum + (book.rating || 0), 0) /
             booksData.length
-          ).toFixed(1),
+          ).toFixed(1) || "0",
           description: language === "en" ? "Book ratings" : "تقييمات الكتب",
           icon: <TrendingUp className="h-6 w-6" />,
           trend: 2.1,
@@ -273,20 +273,24 @@ const AdminDashboardPage = () => {
           : "فشل تحميل بيانات لوحة التحكم. حاول مرة أخرى لاحقًا."
       );
     } finally {
-      setIsLoading(false);
+      setDataLoading(false);
     }
-  }, [language, isAuthenticated, isAdmin]);
+  }, [language, user, isAdmin]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (isAdmin) {
+      fetchData();
+    }
+  }, [fetchData, isAdmin]);
 
   // تصفية الكتب
   const filteredBooks = useMemo(() => {
     return books.filter((book) => {
-      const matchesSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      const matchesSearch =
+        book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         book.author.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = categoryFilter === "all" || book.categoryId?.toString() === categoryFilter;
+      const matchesCategory =
+        categoryFilter === "all" || book.categoryId?.toString() === categoryFilter;
       return matchesSearch && matchesCategory;
     });
   }, [books, searchTerm, categoryFilter]);
@@ -296,17 +300,15 @@ const AdminDashboardPage = () => {
     navigate("/admin/books/add");
   }, [navigate]);
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center text-muted-foreground">
-          {language === "en" ? "Loading..." : "جاري التحميل..."}
-        </div>
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     );
   }
 
-  if (!isAuthenticated || !isAdmin) {
+  if (!isAdmin) {
     return null; // سيتم التعامل معه في useEffect
   }
 
@@ -328,214 +330,236 @@ const AdminDashboardPage = () => {
         </div>
       )}
 
-      {/* الإحصائيات */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </CardTitle>
-              <div className="p-2 bg-primary/10 rounded-full">
-                {stat.icon}
+      {dataLoading ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        </div>
+      ) : (
+        <>
+          {/* الإحصائيات */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {stats.map((stat, index) => (
+              <Card key={index}>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    {stat.title}
+                  </CardTitle>
+                  <div className="p-2 bg-primary/10 rounded-full">
+                    {stat.icon}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stat.value}</div>
+                  <div className="flex items-center mt-1">
+                    <CardDescription className="flex-1">
+                      {stat.description}
+                    </CardDescription>
+                    {stat.trend && (
+                      <span className={`text-sm ${stat.trend > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {stat.trend > 0 ? '+' : ''}{stat.trend}%
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* الرسم البياني للمبيعات */}
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>
+                  {language === "en" ? "Sales Overview" : "نظرة عامة على المبيعات"}
+                </CardTitle>
+                <Select value={timeRange} onValueChange={(value: "week" | "month" | "year") => setTimeRange(value)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder={language === "en" ? "Select period" : "اختر الفترة"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="week">
+                      {language === "en" ? "Last Week" : "الأسبوع الماضي"}
+                    </SelectItem>
+                    <SelectItem value="month">
+                      {language === "en" ? "Last Month" : "الشهر الماضي"}
+                    </SelectItem>
+                    <SelectItem value="year">
+                      {language === "en" ? "Last Year" : "السنة الماضية"}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <div className="flex items-center mt-1">
-                <CardDescription className="flex-1">
-                  {stat.description}
-                </CardDescription>
-                {stat.trend && (
-                  <span className={`text-sm ${stat.trend > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {stat.trend > 0 ? '+' : ''}{stat.trend}%
-                  </span>
+              <div className="h-[300px]">
+                {salesData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={salesData}>
+                      <defs>
+                        <linearGradient id="colorUv" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <Tooltip />
+                      <Area
+                        type="monotone"
+                        dataKey="amount"
+                        stroke="#8884d8"
+                        fillOpacity={1}
+                        fill="url(#colorUv)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    {language === "en" ? "No sales data available." : "لا توجد بيانات مبيعات متاحة."}
+                  </div>
                 )}
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
 
-      {/* الرسم البياني للمبيعات */}
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>
-              {language === "en" ? "Sales Overview" : "نظرة عامة على المبيعات"}
-            </CardTitle>
-            <Select value={timeRange} onValueChange={(value: "week" | "month" | "year") => setTimeRange(value)}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={language === "en" ? "Select period" : "اختر الفترة"} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="week">
-                  {language === "en" ? "Last Week" : "الأسبوع الماضي"}
-                </SelectItem>
-                <SelectItem value="month">
-                  {language === "en" ? "Last Month" : "الشهر الماضي"}
-                </SelectItem>
-                <SelectItem value="year">
-                  {language === "en" ? "Last Year" : "السنة الماضية"}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={salesData}>
-                <defs>
-                  <linearGradient id="colorUv" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" />
-                <YAxis />
-                <CartesianGrid strokeDasharray="3 3" />
-                <Tooltip />
-                <Area
-                  type="monotone"
-                  dataKey="amount"
-                  stroke="#8884d8"
-                  fillOpacity={1}
-                  fill="url(#colorUv)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* آخر المبيعات والمستخدمين */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {language === "en" ? "Recent Sales" : "آخر المبيعات"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentSales.map((sale) => (
-                <div
-                  key={sale.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <Clock className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <div className="font-medium">
-                        ${sale.amount.toLocaleString()}
+          {/* آخر المبيعات والمستخدمين */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {language === "en" ? "Recent Sales" : "آخر المبيعات"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {recentSales.length > 0 ? recentSales.map((sale) => (
+                    <div
+                      key={sale.id}
+                      className="flex items-center justify-between p-4 border rounded-lg"
+                    >
+                      <div className="flex items-center gap-4">
+                        <Clock className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <div className="font-medium">
+                            ${sale.amount.toLocaleString()}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {sale.date.toDate().toLocaleDateString()}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        {sale.date.toDate().toLocaleDateString()}
-                      </div>
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
                     </div>
-                  </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {language === "en" ? "Recent Users" : "آخر المستخدمين"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentUsers.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <img
-                      src={user.avatar || "https://via.placeholder.com/40"}
-                      alt={user.name}
-                      className="h-10 w-10 rounded-full"
-                      loading="lazy"
-                    />
-                    <div>
-                      <div className="font-medium">{user.name}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {user.email}
-                      </div>
+                  )) : (
+                    <div className="text-center text-muted-foreground py-4">
+                      {language === "en" ? "No recent sales." : "لا توجد مبيعات حديثة."}
                     </div>
-                  </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                  )}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              </CardContent>
+            </Card>
 
-      {/* قائمة الكتب */}
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>
-              {language === "en" ? "Book Inventory" : "مخزون الكتب"}
-            </CardTitle>
-            <div className="flex gap-4">
-              <Input
-                placeholder={language === "en" ? "Search books..." : "البحث في الكتب..."}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-[200px]"
-              />
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder={language === "en" ? "All Categories" : "جميع الفئات"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    {language === "en" ? "All Categories" : "جميع الفئات"}
-                  </SelectItem>
-                  {/* إضافة الفئات هنا */}
-                </SelectContent>
-              </Select>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {language === "en" ? "Recent Users" : "آخر المستخدمين"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {recentUsers.length > 0 ? recentUsers.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between p-4 border rounded-lg"
+                    >
+                      <div className="flex items-center gap-4">
+                        <img
+                          src={user.avatar || "https://via.placeholder.com/40"}
+                          alt={user.name}
+                          className="h-10 w-10 rounded-full"
+                          loading="lazy"
+                        />
+                        <div>
+                          <div className="font-medium">{user.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {user.email}
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  )) : (
+                    <div className="text-center text-muted-foreground py-4">
+                      {language === "en" ? "No recent users." : "لا توجد مستخدمين جدد."}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </CardHeader>
-        <CardContent>
-          {filteredBooks.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
-              {language === "en" ? "No books found." : "لم يتم العثور على كتب."}
-            </div>
-          ) : (
-            <VirtualizedList
-              height={600}
-              itemCount={filteredBooks.length}
-              itemSize={200}
-              width="100%"
-            >
-              {({ index, style }) => (
-                <div style={style}>
-                  <BookCard
-                    key={filteredBooks[index].id}
-                    id={filteredBooks[index].id}
-                    title={filteredBooks[index].title}
-                    author={filteredBooks[index].author}
-                    coverImage={filteredBooks[index].coverImage}
-                    price={filteredBooks[index].price}
-                    rating={filteredBooks[index].rating}
-                    isbn={filteredBooks[index].isbn}
-                    ratingCount={filteredBooks[index].ratingCount}
+
+          {/* قائمة الكتب */}
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>
+                  {language === "en" ? "Book Inventory" : "مخزون الكتب"}
+                </CardTitle>
+                <div className="flex gap-4">
+                  <Input
+                    placeholder={language === "en" ? "Search books..." : "البحث في الكتب..."}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-[200px]"
                   />
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder={language === "en" ? "All Categories" : "جميع الفئات"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">
+                        {language === "en" ? "All Categories" : "جميع الفئات"}
+                      </SelectItem>
+                      {/* إضافة الفئات هنا */}
+                    </SelectContent>
+                  </Select>
                 </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {filteredBooks.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8">
+                  {language === "en" ? "No books found." : "لم يتم العثور على كتب."}
+                </div>
+              ) : (
+                <VirtualizedList
+                  height={600}
+                  itemCount={filteredBooks.length}
+                  itemSize={200}
+                  width="100%"
+                >
+                  {({ index, style }) => (
+                    <div style={style}>
+                      <BookCard
+                        key={filteredBooks[index].id}
+                        id={filteredBooks[index].id}
+                        title={filteredBooks[index].title}
+                        author={filteredBooks[index].author}
+                        coverImage={filteredBooks[index].coverImage}
+                        price={filteredBooks[index].price}
+                        rating={filteredBooks[index].rating}
+                        isbn={filteredBooks[index].isbn}
+                        ratingCount={filteredBooks[index].ratingCount}
+                      />
+                    </div>
+                  )}
+                </VirtualizedList>
               )}
-            </VirtualizedList>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 };

@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "mobestore-e1db5"
-  }
+  },
+  "targets": {
+    "mobestore-e1db5": {
+      "hosting": {
+        "mobe-store": [
+          "mobe-store"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

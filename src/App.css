@@ -1,3 +1,9 @@
+/* تعريف المتغيرات العامة (مثل الألوان) */
+:root {
+  --brand-blue: #1e40af; /* لون مخصص لـ brand-blue، يمكنك تغييره حسب تصميمك */
+}
+
+/* الأنماط الأساسية للتطبيق */
 #root {
   max-width: 1280px;
   margin: 0 auto;
@@ -5,19 +11,32 @@
   text-align: center;
 }
 
+/* دعم اتجاه النصوص بناءً على اللغة */
+html[dir="rtl"] {
+  direction: rtl;
+}
+
+html[dir="ltr"] {
+  direction: ltr;
+}
+
+/* أنماط الـ logo */
 .logo {
   height: 6em;
   padding: 1.5em;
   will-change: filter;
   transition: filter 300ms;
 }
+
 .logo:hover {
   filter: drop-shadow(0 0 2em #646cffaa);
 }
+
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
 
+/* الرسوم المتحركة للـ logo */
 @keyframes logo-spin {
   from {
     transform: rotate(0deg);
@@ -33,10 +52,58 @@
   }
 }
 
+/* أنماط الـ card */
 .card {
   padding: 2em;
 }
 
+/* أنماط النصوص التوثيقية */
 .read-the-docs {
   color: #888;
+}
+
+/* أنماط مخصصة لصفحة الاتصال */
+.bg-brand-blue {
+  background-color: var(--brand-blue);
+}
+
+.bg-brand-blue\/90 {
+  background-color: rgba(30, 64, 175, 0.9); /* لدعم تأثير hover بتعتيم خفيف */
+}
+
+/* تحسين مظهر النموذج */
+form label {
+  font-weight: 500;
+}
+
+form input,
+form textarea {
+  transition: border-color 0.2s ease-in-out;
+}
+
+form input:focus,
+form textarea:focus {
+  outline: none;
+  border-color: var(--brand-blue);
+}
+
+/* تحسين مظهر قسم معلومات الاتصال */
+.bg-brand-blue p,
+.bg-brand-blue a {
+  line-height: 1.6;
+}
+
+/* التأكد من أن النصوص في النموذج تتماشى مع اللغة */
+html[dir="rtl"] .bg-brand-blue .flex.items-start {
+  flex-direction: row-reverse;
+}
+
+html[dir="rtl"] .bg-brand-blue .flex.items-start svg {
+  margin-left: 0;
+  margin-right: 0.75rem; /* 3 في Tailwind */
+}
+
+html[dir="ltr"] .bg-brand-blue .flex.items-start svg {
+  margin-right: 0;
+  margin-left: 0.75rem; /* 3 في Tailwind */
 }

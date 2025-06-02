@@ -1,4 +1,3 @@
-// BookCard.tsx
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Star } from "lucide-react";
@@ -21,9 +20,10 @@ interface BookCardProps {
   className?: string;
   isbn?: string; // إضافة خاصية اختيارية
   ratingCount?: number; // إضافة خاصية اختيارية
+  sold?: number; // إضافة خاصية اختيارية لعدد المبيعات
 }
 
-const BookCard = ({ id, title, author, coverImage, price, originalPrice, rating, className, isbn, ratingCount }: BookCardProps) => {
+const BookCard = ({ id, title, author, coverImage, price, originalPrice, rating, className, isbn, ratingCount, sold }: BookCardProps) => {
   const { language } = useTheme();
   const { t } = useTranslation(language);
   const navigate = useNavigate();
@@ -98,6 +98,11 @@ const BookCard = ({ id, title, author, coverImage, price, originalPrice, rating,
                 {currencyFormatter.format(price)}
               </span>
               {isbn && <p className="text-xs text-muted-foreground mt-1">ISBN: {isbn}</p>}
+              {sold && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {language === 'en' ? `${sold.toLocaleString()} sold` : `${sold.toLocaleString()} مبيعات`}
+                </p>
+              )}
             </div>
           </div>
           

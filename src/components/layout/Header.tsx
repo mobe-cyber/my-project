@@ -2,16 +2,16 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAuth } from "@/context/AuthContext"; 
-import { 
+import { useAuth } from "@/context/AuthContext";
+import {
   Menu,
   Search,
-  ShoppingCart, 
-  Sun, 
-  Moon, 
+  ShoppingCart,
+  Sun,
+  Moon,
   User,
   BookOpen,
-  Globe
+  Globe,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
@@ -23,7 +23,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { collection, getDocs } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 
 const Header = () => {
@@ -52,34 +53,48 @@ const Header = () => {
   };
 
   useEffect(() => {
-    const mockBooksEn = [
-      "The Power of Habit",
-      "The Alchemist",
-      "The Art of Programming",
-    ];
-    const mockBooksAr = [
-      "قوة العادة",
-      "الخيميائي",
-      "فن البرمجة",
-    ];
-    const books = language === "en" ? mockBooksEn : mockBooksAr;
-    const filtered = books.filter((title) =>
-      title.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    if (searchTerm.trim() && filtered.length > 0) {
-      setSuggestions(filtered);
-      setShowSuggestions(true);
-    } else {
-      setSuggestions([]);
-      setShowSuggestions(false);
-    }
-  }, [searchTerm, language]);
+    const fetchSuggestions = async () => {
+      if (searchTerm.length < 3) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+
+      try {
+        const booksRef = collection(db, "books");
+        const querySnapshot = await getDocs(booksRef);
+
+        const filteredBooks: string[] = [];
+        const uniqueTitles = new Set<string>();
+
+        querySnapshot.forEach((doc) => {
+          const bookData = doc.data();
+          const bookTitle = bookData.title;
+          if (
+            bookTitle &&
+            bookTitle.toLowerCase().includes(searchTerm.toLowerCase()) &&
+            !uniqueTitles.has(bookTitle)
+          ) {
+            uniqueTitles.add(bookTitle);
+            filteredBooks.push(bookTitle);
+          }
+        });
+
+        setSuggestions(filteredBooks.slice(0, 5));
+        setShowSuggestions(filteredBooks.length > 0);
+      } catch (error) {
+        console.error("Error fetching books from Firestore:", error);
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    };
+
+    fetchSuggestions();
+  }, [searchTerm]);
 
   const handleLogout = async () => {
     try {
-      console.log("Attempting to sign out...");
       await signOut(auth);
-      console.log("Sign out successful.");
       toast({
         title: language === "en" ? "Logged out" : "تم تسجيل الخروج",
         description: language === "en" ? "You have been logged out successfully." : "تم تسجيل خروجك بنجاح.",
@@ -105,42 +120,45 @@ const Header = () => {
               <span className="font-bold text-xl ms-2">MobeStore</span>
             </Link>
             <nav className="hidden md:flex ms-10">
-              <ul className="flex space-s-8">
-                <li>
+              <ul className="flex items-center gap-10">
+                <li className="min-w-[80px] px-3 text-center">
                   <Link to="/" className="hover:text-primary transition-colors">
-                    {t('home')}
+                    {t("home")}
                   </Link>
                 </li>
-                <li>
+                <li className="min-w-[80px] px-3 text-center">
                   <Link to="/categories" className="hover:text-primary transition-colors">
-                    {t('categories')}
+                    {t("categories")}
                   </Link>
                 </li>
-                <li>
+                <li className="min-w-[80px] px-3 text-center">
                   <Link to="/bestsellers" className="hover:text-primary transition-colors">
-                    {t('bestsellers')}
+                    {t("bestsellers")}
                   </Link>
                 </li>
-                <li>
+                <li className="min-w-[80px] px-3 text-center">
                   <Link to="/offers" className="hover:text-primary transition-colors">
-                    {t('offers')}
+                    {t("offers")}
                   </Link>
                 </li>
               </ul>
             </nav>
           </div>
 
-          <div className="flex items-center space-s-4">
+          <div className="flex items-center space-x-4">
             <form onSubmit={handleSearch} className="hidden md:block relative">
-              <Input 
-                placeholder={t('search')} 
+              <Input
+                placeholder={t("search")}
                 className="w-64 pe-8"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 100)}
               />
-              <button type="submit" className="absolute top-0 end-0 h-full px-3 flex items-center justify-center bg-transparent border-none">
+              <button
+                type="submit"
+                className="absolute top-0 end-0 h-full px-3 flex items-center justify-center bg-transparent border-none"
+              >
                 <Search className="h-4 w-4 text-muted-foreground" />
               </button>
               {showSuggestions && suggestions.length > 0 && (
@@ -162,19 +180,24 @@ const Header = () => {
               )}
             </form>
 
-            <Button variant="ghost" size="icon" onClick={toggleTheme} title={theme === 'dark' ? t('lightMode') : t('darkMode')}>
-              {theme === 'dark' ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              title={theme === "dark" ? t("lightMode") : t("darkMode")}
+            >
+              {theme === "dark" ? (
                 <Sun className="h-5 w-5" />
               ) : (
                 <Moon className="h-5 w-5" />
               )}
             </Button>
 
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => changeLanguage(language === 'en' ? 'ar' : 'en')}
-              title={t('changeLanguage')}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => changeLanguage(language === "en" ? "ar" : "en")}
+              title={t("changeLanguage")}
             >
               <Globe className="h-5 w-5" />
             </Button>
@@ -196,28 +219,28 @@ const Header = () => {
                   <>
                     <DropdownMenuItem asChild>
                       <Link to="/account" className="w-full">
-                        {t('myAccount')}
+                        {t("myAccount")}
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to="/library" className="w-full">
-                        {t('myLibrary')}
+                        {t("myLibrary")}
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleLogout}>
-                      {t('logout')}
+                      {t("logout")}
                     </DropdownMenuItem>
                   </>
                 ) : (
                   <>
                     <DropdownMenuItem asChild>
                       <Link to="/login" className="w-full">
-                        {t('login')}
+                        {t("login")}
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to="/register" className="w-full">
-                        {t('register')}
+                        {t("register")}
                       </Link>
                     </DropdownMenuItem>
                   </>
@@ -225,27 +248,37 @@ const Header = () => {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button variant="ghost" size="icon" onClick={toggleMobileMenu} className="md:hidden">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleMobileMenu}
+              className="md:hidden"
+            >
               <Menu className="h-5 w-5" />
             </Button>
           </div>
         </div>
 
-        <div className={cn(
-          "md:hidden overflow-hidden transition-all duration-300", 
-          isMobileMenuOpen ? "max-h-96" : "max-h-0"
-        )}>
+        <div
+          className={cn(
+            "md:hidden overflow-hidden transition-all duration-300",
+            isMobileMenuOpen ? "max-h-96" : "max-h-0"
+          )}
+        >
           <div className="pb-4 flex flex-col space-y-4">
             <form onSubmit={handleSearch} className="relative">
-              <Input 
-                placeholder={t('search')} 
+              <Input
+                placeholder={t("search")}
                 className="w-full pe-8"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 100)}
               />
-              <button type="submit" className="absolute top-0 end-0 h-full px-3 flex items-center justify-center bg-transparent border-none">
+              <button
+                type="submit"
+                className="absolute top-0 end-0 h-full px-3 flex items-center justify-center bg-transparent border-none"
+              >
                 <Search className="h-4 w-4 text-muted-foreground" />
               </button>
               {showSuggestions && suggestions.length > 0 && (
@@ -270,22 +303,22 @@ const Header = () => {
               <ul className="space-y-2">
                 <li>
                   <Link to="/" className="block py-2 hover:text-primary transition-colors">
-                    {t('home')}
+                    {t("home")}
                   </Link>
                 </li>
                 <li>
                   <Link to="/categories" className="block py-2 hover:text-primary transition-colors">
-                    {t('categories')}
+                    {t("categories")}
                   </Link>
                 </li>
                 <li>
                   <Link to="/bestsellers" className="block py-2 hover:text-primary transition-colors">
-                    {t('bestsellers')}
+                    {t("bestsellers")}
                   </Link>
                 </li>
                 <li>
                   <Link to="/offers" className="block py-2 hover:text-primary transition-colors">
-                    {t('offers')}
+                    {t("offers")}
                   </Link>
                 </li>
               </ul>

@@ -7,7 +7,7 @@ import { Star, ShoppingCart, BookOpen } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useTranslation } from "@/translations";
 import { useToast } from "@/hooks/use-toast";
-import { doc, getDoc, addDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, getDocs, query, where, deleteDoc, updateDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 
 interface Book {
@@ -26,6 +26,7 @@ interface Book {
   reviews?: Array<{
     id: string;
     username: string;
+    photoURL: string;
     rating: number;
     date: string;
     comment: string;
@@ -46,6 +47,10 @@ const BookDetails = () => {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [newRating, setNewRating] = useState(0);
   const [newComment, setNewComment] = useState("");
+  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
+  const [editRating, setEditRating] = useState<number>(0);
+  const [editComment, setEditComment] = useState<string>("");
+  const [visibleReviewsCount, setVisibleReviewsCount] = useState(5); // عدد التقييمات المرئية في البداية
   const user = auth.currentUser;
 
   useEffect(() => {
@@ -58,7 +63,6 @@ const BookDetails = () => {
           const bookData = { id: docSnap.id, ...docSnap.data() } as Book;
           setBook(bookData);
 
-          // جلب التقييمات من المجموعة الفرعية
           const reviewsRef = collection(db, "books", id, "reviews");
           const reviewsSnap = await getDocs(reviewsRef);
           const reviewsData = reviewsSnap.docs.map((doc) => ({
@@ -73,11 +77,11 @@ const BookDetails = () => {
             variant: "destructive",
           });
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error fetching book:", error);
         toast({
           title: language === "en" ? "Error" : "خطأ",
-          description: language === "en" ? "Failed to fetch book details." : "فشل في جلب تفاصيل الكتاب.",
+          description: language === "en" ? "Failed to fetch book details. Please try again later." : "فشل في جلب تفاصيل الكتاب. حاول مرة أخرى لاحقًا.",
           variant: "destructive",
         });
       } finally {
@@ -85,11 +89,24 @@ const BookDetails = () => {
       }
     };
 
+    const checkCart = async () => {
+      if (!user || !id) return;
+      try {
+        const cartRef = collection(db, "carts");
+        const q = query(cartRef, where("userId", "==", user.uid), where("bookId", "==", id));
+        const querySnapshot = await getDocs(q);
+        setIsInCart(!querySnapshot.empty);
+      } catch (error) {
+        console.error("Error checking cart:", error);
+      }
+    };
+
     fetchBook();
-  }, [id, language, toast]);
+    checkCart();
+  }, [id, language, toast, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !id) return;
 
     const checkPurchase = async () => {
       const purchasesRef = collection(db, "purchases");
@@ -101,12 +118,58 @@ const BookDetails = () => {
     checkPurchase();
   }, [user, id]);
 
-  const handleAddToCart = () => {
-    setIsInCart(true);
-    toast({
-      title: language === "en" ? "Added to cart" : "تمت الإضافة إلى السلة",
-      description: language === "en" ? "The book has been added to your cart" : "تم إضافة الكتاب إلى سلة التسوق الخاصة بك",
-    });
+  const handleAddToCart = async () => {
+    if (!user) {
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Please sign in to add the book to your cart." : "يرجى تسجيل الدخول لإضافة الكتاب إلى السلة.",
+        variant: "destructive",
+      });
+      navigate("/login");
+      return;
+    }
+
+    try {
+      // تحقق إذا كان الكتاب موجود بالفعل في السلة
+      const cartRef = collection(db, "carts");
+      const q = query(cartRef, where("userId", "==", user.uid), where("bookId", "==", id));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        // الكتاب موجود بالفعل في السلة
+        toast({
+          title: language === "en" ? "Already in cart" : "موجود بالفعل في السلة",
+          description: language === "en" ? "This book is already in your cart." : "هذا الكتاب موجود بالفعل في سلة التسوق الخاصة بك.",
+        });
+        setIsInCart(true);
+        return;
+      }
+
+      // إضافة الكتاب إلى السلة في Firestore
+      await addDoc(collection(db, "carts"), {
+        userId: user.uid,
+        bookId: book!.id,
+        title: book!.title,
+        author: book!.author,
+        coverImage: book!.coverImage,
+        price: book!.price,
+        quantity: 1,
+        addedAt: new Date().toISOString(),
+      });
+
+      setIsInCart(true);
+      toast({
+        title: language === "en" ? "Added to cart" : "تمت الإضافة إلى السلة",
+        description: language === "en" ? "The book has been added to your cart" : "تم إضافة الكتاب إلى سلة التسوق الخاصة بك",
+      });
+    } catch (error) {
+      console.error("Error adding book to cart:", error);
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Failed to add book to cart." : "فشل في إضافة الكتاب إلى السلة.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleBuyNow = () => {
@@ -168,16 +231,18 @@ const BookDetails = () => {
 
     try {
       const newReview = {
-        id: `${user.uid}_${Date.now()}`,
         username: user.displayName || "Anonymous",
+        photoURL: user.photoURL || "https://via.placeholder.com/40",
         rating: newRating,
         date: new Date().toISOString().split("T")[0],
         comment: newComment,
       };
 
-      await addDoc(collection(db, "books", id, "reviews"), newReview);
+      const reviewRef = await addDoc(collection(db, "books", id, "reviews"), newReview);
+      const reviewWithId = { id: reviewRef.id, ...newReview };
 
-      setReviews((prevReviews) => [...(prevReviews || []), newReview]);
+      setReviews((prevReviews) => [...(prevReviews || []), reviewWithId]);
+      setVisibleReviewsCount((prevCount) => prevCount + 1);
 
       setNewRating(0);
       setNewComment("");
@@ -195,6 +260,93 @@ const BookDetails = () => {
         variant: "destructive",
       });
     }
+  };
+
+  const handleEditReview = (review: Book["reviews"][0]) => {
+    setEditingReviewId(review.id);
+    setEditRating(review.rating);
+    setEditComment(review.comment);
+  };
+
+  const handleUpdateReview = async (reviewId: string) => {
+    if (!user || !id) return;
+
+    if (editRating < 1 || editRating > 5) {
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Please select a rating between 1 and 5." : "يرجى اختيار تقييم بين 1 و 5.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!editComment.trim()) {
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Please write a comment." : "يرجى كتابة تعليق.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const reviewRef = doc(db, "books", id, "reviews", reviewId);
+      await updateDoc(reviewRef, {
+        rating: editRating,
+        comment: editComment,
+        date: new Date().toISOString().split("T")[0],
+      });
+
+      setReviews((prevReviews) =>
+        prevReviews?.map((rev) =>
+          rev.id === reviewId ? { ...rev, rating: editRating, comment: editComment, date: new Date().toISOString().split("T")[0] } : rev
+        )
+      );
+
+      setEditingReviewId(null);
+      setEditRating(0);
+      setEditComment("");
+
+      toast({
+        title: language === "en" ? "Review Updated" : "تم تحديث التقييم",
+        description: language === "en" ? "Your review has been successfully updated." : "تم تحديث تقييمك بنجاح.",
+      });
+    } catch (error) {
+      console.error("Error updating review:", error);
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Failed to update review." : "فشل في تحديث التقييم.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (!user || !id) return;
+
+    try {
+      const reviewRef = doc(db, "books", id, "reviews", reviewId);
+      await deleteDoc(reviewRef);
+
+      setReviews((prevReviews) => prevReviews?.filter((rev) => rev.id !== reviewId));
+      setVisibleReviewsCount((prevCount) => Math.min(prevCount, reviews.length - 1));
+
+      toast({
+        title: language === "en" ? "Review Deleted" : "تم حذف التقييم",
+        description: language === "en" ? "Your review has been successfully deleted." : "تم حذف تقييمك بنجاح.",
+      });
+    } catch (error) {
+      console.error("Error deleting review:", error);
+      toast({
+        title: language === "en" ? "Error" : "خطأ",
+        description: language === "en" ? "Failed to delete review." : "فشل في حذف التقييم.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleShowMoreReviews = () => {
+    setVisibleReviewsCount((prevCount) => prevCount + 5);
   };
 
   const renderStars = (rating: number) => {
@@ -253,11 +405,7 @@ const BookDetails = () => {
           <div className="lg:w-1/3">
             <div className="sticky top-24">
               <div className="relative pb-[150%] overflow-hidden rounded-lg shadow-lg border border-border">
-                <img 
-                  src={book.coverImage} 
-                  alt={book.title} 
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
+                <img src={book.coverImage} alt={book.title} className="absolute inset-0 w-full h-full object-cover" />
               </div>
             </div>
           </div>
@@ -332,29 +480,90 @@ const BookDetails = () => {
             <div>
               <h2 className="text-xl font-semibold mb-4">{t("reviews")}</h2>
               {reviews.length > 0 ? (
-                <div className="space-y-4">
-                  {reviews.map((review) => (
-                    <Card key={review.id}>
-                      <CardContent className="p-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-semibold">{review.username}</p>
-                            <div className="flex items-center mt-1">
-                              {renderStars(review.rating)}
-                              <span className="text-xs text-muted-foreground ms-2">{review.date}</span>
+                <>
+                  <div className="space-y-4">
+                    {reviews.slice(0, visibleReviewsCount).map((review) => (
+                      <Card key={review.id}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-4 mb-2">
+                            <img
+                              src={review.photoURL || "https://via.placeholder.com/40"}
+                              alt={`${review.username}'s profile`}
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                            <div>
+                              <p className="font-semibold">{review.username}</p>
+                              <div className="flex items-center mt-1">
+                                {renderStars(review.rating)}
+                                <span className="text-xs text-muted-foreground ms-2">{review.date}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <p className="mt-2">{review.comment}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                          {user && user.displayName === review.username && (
+                            <div className="flex gap-2 mt-2">
+                              <Button variant="outline" size="sm" onClick={() => handleEditReview(review)}>
+                                {language === "en" ? "Edit" : "تعديل"}
+                              </Button>
+                              <Button variant="destructive" size="sm" onClick={() => handleDeleteReview(review.id)}>
+                                {language === "en" ? "Delete" : "حذف"}
+                              </Button>
+                            </div>
+                          )}
+                          {editingReviewId === review.id ? (
+                            <div className="mt-4">
+                              <div className="mb-4">
+                                <label className="block text-sm text-muted-foreground mb-1">
+                                  {language === "en" ? "Edit Your Rating" : "تعديل تقييمك"}
+                                </label>
+                                <div className="flex">
+                                  {[...Array(5)].map((_, i) => (
+                                    <Star
+                                      key={`edit-star-${i}`}
+                                      className={`h-6 w-6 cursor-pointer ${editRating >= i + 1 ? "text-yellow-500 fill-yellow-500" : "text-gray-300"}`}
+                                      onClick={() => setEditRating(i + 1)}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="mb-4">
+                                <label className="block text-sm text-muted-foreground mb-1">
+                                  {language === "en" ? "Edit Your Comment" : "تعديل تعليقك"}
+                                </label>
+                                <textarea
+                                  value={editComment}
+                                  onChange={(e) => setEditComment(e.target.value)}
+                                  className="w-full p-2 border border-border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
+                                  rows={4}
+                                  placeholder={language === "en" ? "Edit your review here..." : "عدّل تقييمك هنا..."}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <Button onClick={() => handleUpdateReview(review.id)}>
+                                  {language === "en" ? "Update Review" : "تحديث التقييم"}
+                                </Button>
+                                <Button variant="outline" onClick={() => setEditingReviewId(null)}>
+                                  {language === "en" ? "Cancel" : "إلغاء"}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="mt-2">{review.comment}</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                  {visibleReviewsCount < reviews.length && (
+                    <div className="mt-4 text-center">
+                      <Button variant="outline" onClick={handleShowMoreReviews}>
+                        {language === "en" ? "Show More" : "عرض المزيد"}
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-muted-foreground">
-                  {language === "en"
-                    ? "No reviews yet. Be the first to review this book!"
-                    : "لا توجد مراجعات بعد. كن أول من يراجع هذا الكتاب!"}
+                  {language === "en" ? "No reviews yet. Be the first to review this book!" : "لا توجد مراجعات بعد. كن أول من يراجع هذا الكتاب!"}
                 </p>
               )}
 
